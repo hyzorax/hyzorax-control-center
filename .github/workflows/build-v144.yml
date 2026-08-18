@@ -11,6 +11,7 @@ on:
     types: [opened]
 
 permissions:
+  actions: write
   contents: write
   issues: write
 
@@ -127,3 +128,14 @@ jobs:
           git add release-status/v1.4.4-failed.txt
           git commit -m 'Record V1.4.4 failed build' || exit 0
           git push || true
+
+  dispatch-v150:
+    if: github.event_name == 'issues' && github.event.issue.title == 'HYZoraX V1.5.0 Build Trigger'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Dispatch validated V1.5.0 release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run build-v150.yml --repo "${GITHUB_REPOSITORY}" --ref main
