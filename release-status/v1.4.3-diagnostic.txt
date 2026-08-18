@@ -3,30 +3,28 @@ rc=1
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100 10.4M  100 10.4M    0     0  44.7M      0 --:--:-- --:--:-- --:--:-- 44.7M
+100 10.4M  100 10.4M    0     0  20.2M      0 --:--:-- --:--:-- --:--:-- 20.2M
 V1.4.3 consolidated polish patch applied
+V1.4.3 tests updated
 go: downloading golang.org/x/crypto v0.55.0
 go: downloading golang.org/x/sys v0.47.0
 go: downloading modernc.org/sqlite v1.56.0
 go: downloading modernc.org/libc v1.74.4
 go: downloading modernc.org/mathutil v1.7.1
 go: downloading github.com/google/uuid v1.6.0
-go: downloading github.com/dustin/go-humanize v1.0.1
 go: downloading modernc.org/memory v1.11.0
+go: downloading github.com/dustin/go-humanize v1.0.1
 go: downloading github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec
-ok  	github.com/hyzorax/hyzorax-control/cmd/hyzorax-control	0.411s
+ok  	github.com/hyzorax/hyzorax-control/cmd/hyzorax-control	0.339s
 ?   	github.com/hyzorax/hyzorax-control/cmd/hyzorax-control-helper	[no test files]
 ok  	github.com/hyzorax/hyzorax-control/internal/config	0.006s
-ok  	github.com/hyzorax/hyzorax-control/internal/cryptoutil	0.295s
-ok  	github.com/hyzorax/hyzorax-control/internal/helper	0.026s
---- FAIL: TestInitialOwnerLoginSessionFlow (0.11s)
-    app_test.go:62: login password control is missing Sign in as hyzorax
+ok  	github.com/hyzorax/hyzorax-control/internal/cryptoutil	0.356s
+ok  	github.com/hyzorax/hyzorax-control/internal/helper	0.019s
+--- FAIL: TestInitialOwnerLoginSessionFlow (0.20s)
+    app_test.go:62: login password control is missing Version 1.4.2
 FAIL
-FAIL	github.com/hyzorax/hyzorax-control/internal/httpapi	0.623s
-ok  	github.com/hyzorax/hyzorax-control/internal/store	0.101s
+FAIL	github.com/hyzorax/hyzorax-control/internal/httpapi	0.524s
+ok  	github.com/hyzorax/hyzorax-control/internal/store	0.076s
 ?   	github.com/hyzorax/hyzorax-control/internal/systeminfo	[no test files]
---- FAIL: TestEmbeddedInterfaceShowsReleaseVersion (0.00s)
-    assets_test.go:39: embedded sidebar footer does not show release version 1.4.2
-FAIL
-FAIL	github.com/hyzorax/hyzorax-control/internal/web	0.002s
+ok  	github.com/hyzorax/hyzorax-control/internal/web	0.002s
 FAIL
