@@ -1,0 +1,35 @@
+name: Inspect V1.5.0 shipped File Manager UI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  inspect-ui:
+    if: github.event.pull_request.head.ref == 'agent/v1.5.1-ui-refine'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Extract shipped V1.5.0 UI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/v150-ui /tmp/v150.tar.gz
+          mkdir -p /tmp/v150-ui scratch-v151
+          gh release download v1.5.0 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/v150.tar.gz
+          tar -xzf /tmp/v150.tar.gz -C /tmp/v150-ui
+          cp /tmp/v150-ui/hyzorax-control/internal/web/static/app.js scratch-v151/app.js
+          cp /tmp/v150-ui/hyzorax-control/internal/web/static/app.css scratch-v151/app.css
+          cp /tmp/v150-ui/hyzorax-control/internal/web/static/index.html scratch-v151/index.html
+          git config user.name 'HYZoraX UI Inspect Bot'
+          git config user.email 'ui-inspect@hyzorax.invalid'
+          git add scratch-v151
+          git commit -m 'Snapshot shipped V1.5.0 File Manager UI' || exit 0
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
