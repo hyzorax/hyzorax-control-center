@@ -47,6 +47,7 @@ jobs:
           grep -q 'copy_too_large' /tmp/copy.patch
           grep -q 'filesystemMove' /tmp/move.patch
           grep -q 'cross_filesystem_move_denied' /tmp/move.patch
+          grep -q '"syscall"' release-patch/v1.5.0/guarded-move-test-import.patch
 
       - name: Apply V1.5.0 guarded patches
         run: |
@@ -56,6 +57,7 @@ jobs:
             patch --batch -p1 -d work/hyzorax-control < /tmp/rename.patch
             patch --batch -p1 -d work/hyzorax-control < /tmp/copy.patch
             patch --batch -p1 -d work/hyzorax-control < /tmp/move.patch
+            patch --batch -p1 -d work/hyzorax-control < release-patch/v1.5.0/guarded-move-test-import.patch
           } 2>&1 | tee /tmp/patch.log
 
       - name: Static syntax and feature checks
