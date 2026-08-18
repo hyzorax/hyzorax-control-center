@@ -37,8 +37,9 @@ jobs:
       - name: Apply V1.4.3 consolidated patch
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.4.3/apply.py
+          python3 -m py_compile release-patch/v1.4.3/apply.py release-patch/v1.4.3/fix-tests.py
           python3 release-patch/v1.4.3/apply.py work/hyzorax-control
+          python3 release-patch/v1.4.3/fix-tests.py work/hyzorax-control
 
       - name: Static syntax checks
         run: |
