@@ -1,0 +1,40 @@
+name: Diagnose V1.4.3 patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-v143.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download base and diagnose patch
+        run: |
+          set +e
+          mkdir -p work release-status
+          curl -fL --retry 3 https://github.com/hyzorax/hyzorax-control-center/releases/download/v1.4.2/HYZoraX_Control_Center_Linux_x86_64.tar.gz -o /tmp/base.tar.gz > /tmp/diag.log 2>&1
+          rc=$?
+          if [ "$rc" -eq 0 ]; then tar -xzf /tmp/base.tar.gz -C work >> /tmp/diag.log 2>&1; rc=$?; fi
+          if [ "$rc" -eq 0 ]; then python3 -m py_compile release-patch/v1.4.3/apply.py >> /tmp/diag.log 2>&1; rc=$?; fi
+          if [ "$rc" -eq 0 ]; then python3 release-patch/v1.4.3/apply.py work/hyzorax-control >> /tmp/diag.log 2>&1; rc=$?; fi
+          if [ "$rc" -eq 0 ]; then bash -n work/hyzorax-control/packaging/bootstrap.sh >> /tmp/diag.log 2>&1; rc=$?; fi
+          if [ "$rc" -eq 0 ]; then bash -n work/hyzorax-control/packaging/hyzorax-control-tls >> /tmp/diag.log 2>&1; rc=$?; fi
+          if [ "$rc" -eq 0 ]; then bash -n work/hyzorax-control/packaging/hz >> /tmp/diag.log 2>&1; rc=$?; fi
+          if [ "$rc" -eq 0 ]; then node --check work/hyzorax-control/internal/web/static/app.js >> /tmp/diag.log 2>&1; rc=$?; fi
+          {
+            echo "rc=$rc"
+            echo '========== LOG =========='
+            cat /tmp/diag.log
+          } > release-status/v1.4.3-diagnostic.txt
+          git config user.name hyzorax
+          git config user.email hyzorax@gmail.com
+          git add release-status/v1.4.3-diagnostic.txt
+          git commit -m 'Record V1.4.3 patch diagnostic' || exit 0
+          git push
