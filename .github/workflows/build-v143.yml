@@ -1,0 +1,132 @@
+name: Build and release V1.4.3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-v143.yml'
+      - 'release-patch/v1.4.3/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+
+      - name: Download V1.4.2 source release
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          curl -fL --retry 3 \
+            https://github.com/hyzorax/hyzorax-control-center/releases/download/v1.4.2/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            -o /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+
+      - name: Apply V1.4.3 consolidated patch
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.4.3/apply.py
+          python3 release-patch/v1.4.3/apply.py work/hyzorax-control
+
+      - name: Static syntax checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hyzorax-control-tls
+          bash -n packaging/hyzorax-control-updater
+          bash -n packaging/hz
+          node --check internal/web/static/app.js
+          python3 - <<'PY'
+          from pathlib import Path
+          html = Path('internal/web/static/index.html').read_text()
+          assert 'Trusted boundary' not in html
+          assert 'Privileged helper' not in html
+          assert 'Owner</small>' not in html
+          assert 'Sign in as hyzorax' not in html
+          assert 'CONTROL PANEL' in html
+          print('UI assertions: OK')
+          PY
+
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+
+      - name: Build release
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.4.3
+          ./build/hyzorax-control -version
+          ./build/hyzorax-control-helper -version
+          (cd build && sha256sum -c SHA256SUMS)
+
+      - name: Package stable assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          cut -d' ' -f1 HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 > /tmp/v143.sha
+
+      - name: Publish V1.4.3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.4.3 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.4.3 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.4.3' \
+            --notes 'Consolidated panel polish: trusted IP TLS completes inside installation, simplified login, profile sign-out dropdown, Control Panel terminology, privileged-helper dashboard card removed, custom case-sensitive 8-character security entrance, direct hz numeric actions, transactional panel-port change with managed firewall rules, clean colored panel details, and one-second live metrics.' \
+            --latest
+
+      - name: Record successful release
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release-status
+          {
+            echo 'status=success'
+            echo 'version=1.4.3'
+            printf 'archive_sha256='; cat /tmp/v143.sha
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > release-status/v1.4.3.txt
+          rm -f release-status/v1.4.3-failed.txt
+          git config user.name 'hyzorax'
+          git config user.email 'hyzorax@gmail.com'
+          git add release-status/v1.4.3.txt release-status/v1.4.3-failed.txt 2>/dev/null || true
+          git commit -m 'Record V1.4.3 release status' || exit 0
+          git push
+
+      - name: Record failed build
+        if: failure()
+        run: |
+          set +e
+          mkdir -p release-status
+          {
+            echo 'status=failed'
+            echo 'version=1.4.3'
+            echo "failed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > release-status/v1.4.3-failed.txt
+          git config user.name 'hyzorax'
+          git config user.email 'hyzorax@gmail.com'
+          git add release-status/v1.4.3-failed.txt
+          git commit -m 'Record V1.4.3 failed build' || exit 0
+          git push || true
