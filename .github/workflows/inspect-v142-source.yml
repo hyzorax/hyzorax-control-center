@@ -20,6 +20,7 @@ jobs:
       - name: Download V1.4.2 release
         run: |
           set -Eeuo pipefail
+          rm -rf /tmp/hyz-src
           mkdir -p /tmp/hyz-src
           curl -fL --retry 3 \
             https://github.com/hyzorax/hyzorax-control-center/releases/download/v1.4.2/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
@@ -41,12 +42,15 @@ jobs:
             packaging/hz \
             packaging/hyzorax-control-tls \
             packaging/hyzorax-control-updater \
+            packaging/config.toml \
+            internal/web/static/index.html \
             internal/web/static/app.js \
             internal/web/static/app.css \
-            internal/web/static/styles.css \
-            internal/web/templates/login.html \
-            internal/web/templates/index.html \
-            internal/web/templates/app.html; do
+            internal/httpapi/update.go \
+            internal/httpapi/handlers.go \
+            internal/httpapi/entrance.go \
+            internal/helper/update_linux.go \
+            internal/helper/protocol.go; do
             if [ -f "$f" ]; then
               echo "========== FILE: $f ==========" >> "$OUT"
               cat "$f" >> "$OUT"
@@ -60,5 +64,5 @@ jobs:
           git config user.name 'hyzorax'
           git config user.email 'hyzorax@gmail.com'
           git add source-snapshot-v142.txt
-          git commit -m 'Snapshot V1.4.2 source for consolidated polish' || exit 0
+          git commit -m 'Expand V1.4.2 source snapshot' || exit 0
           git push
