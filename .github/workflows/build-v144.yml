@@ -1,10 +1,11 @@
 name: HYZoraX V1.5.0 registered release builder
 
 on:
-  push:
+  pull_request:
     branches: [main]
+    types: [opened]
     paths:
-      - 'release-trigger/v1.5.0.txt'
+      - 'release-trigger/**'
   workflow_dispatch:
 
 permissions:
@@ -12,6 +13,7 @@ permissions:
 
 jobs:
   build-v150:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'agent/v1.5.0-release-trigger')
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
