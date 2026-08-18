@@ -140,4 +140,25 @@ fi
 
 echo "Installing ${PRODUCT} v${control_version}..."
 cd "${build_dir}"
-./bootstrap.sh
+
+# Keep the installer output readable. OpenSSL can emit very long entropy/key
+# generation progress lines made only of punctuation; collapse those into one
+# branded status line while preserving all real bootstrap messages and errors.
+./bootstrap.sh 2>&1 | awk '
+  BEGIN { shown_tls_progress = 0 }
+  {
+    if (length($0) > 80 && $0 !~ /[[:alnum:]_\/:]/ && $0 ~ /[+*]/) {
+      if (!shown_tls_progress) {
+        print "[HYZORAX] Generating secure TLS material..."
+        fflush()
+        shown_tls_progress = 1
+      }
+      next
+    }
+    if ($0 == "-----") {
+      next
+    }
+    print
+    fflush()
+  }
+'
