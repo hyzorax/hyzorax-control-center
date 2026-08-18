@@ -80,7 +80,11 @@ fi
 echo "Outer SHA-256: OK"
 
 # Reject obviously malformed archives before extraction.
-archive_root="$(tar -tzf "${archive_path}" | awk -F/ 'NF {print $1; exit}')"
+# Keep tar separate from any early-exiting parser so `set -o pipefail` cannot
+# turn a harmless SIGPIPE into an installer failure.
+archive_listing="${workdir}/archive.list"
+tar -tzf "${archive_path}" > "${archive_listing}"
+archive_root="$(awk -F/ 'NF {print $1; exit}' "${archive_listing}")"
 if [[ "${archive_root}" != "hyzorax-control" ]]; then
   fail "Unexpected release archive layout."
 fi
