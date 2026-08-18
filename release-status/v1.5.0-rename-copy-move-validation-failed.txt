@@ -2,5 +2,67 @@ status=failed
 version=1.5.0
 features=guarded-rename,guarded-copy,guarded-move
 helper_protocol=7
-validated_commit=354e048b88760ea574d6a2eefc8e90956cdaa22d
-failed_at=2026-08-18T21:22:26Z
+failure_stage=go-test
+validated_commit=a54cb10492990ce66b34d2b38342ac0caaefcdfe
+failed_at=2026-08-18T21:29:30Z
+
+===== patch.log =====
+patching file Makefile
+patching file internal/helper/filesystem_linux.go
+patching file internal/helper/filesystem_linux_test.go
+patching file internal/helper/protocol.go
+patching file internal/helper/server_linux.go
+patching file internal/httpapi/app.go
+patching file internal/httpapi/app_test.go
+patching file internal/httpapi/files_test.go
+patching file internal/httpapi/handlers.go
+patching file internal/web/assets_test.go
+patching file internal/web/static/app.css
+patching file internal/web/static/app.js
+patching file internal/web/static/index.html
+patching file internal/helper/filesystem_linux.go
+patching file internal/helper/filesystem_linux_test.go
+patching file internal/helper/protocol.go
+patching file internal/helper/server_linux.go
+patching file internal/httpapi/app.go
+patching file internal/httpapi/files_test.go
+patching file internal/httpapi/handlers.go
+patching file internal/web/assets_test.go
+patching file internal/web/static/app.css
+patching file internal/web/static/app.js
+patching file internal/web/static/index.html
+patching file internal/helper/filesystem_linux.go
+patching file internal/helper/filesystem_linux_test.go
+patching file internal/helper/protocol.go
+patching file internal/helper/server_linux.go
+patching file internal/httpapi/app.go
+patching file internal/httpapi/files_test.go
+patching file internal/httpapi/handlers.go
+patching file internal/web/assets_test.go
+patching file internal/web/static/app.css
+patching file internal/web/static/app.js
+patching file internal/web/static/index.html
+
+===== go-test.log =====
+go: downloading golang.org/x/crypto v0.55.0
+go: downloading golang.org/x/sys v0.47.0
+go: downloading modernc.org/sqlite v1.56.0
+go: downloading modernc.org/libc v1.74.4
+go: downloading modernc.org/mathutil v1.7.1
+go: downloading github.com/dustin/go-humanize v1.0.1
+go: downloading github.com/google/uuid v1.6.0
+go: downloading modernc.org/memory v1.11.0
+go: downloading github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec
+# github.com/hyzorax/hyzorax-control/internal/helper [github.com/hyzorax/hyzorax-control/internal/helper.test]
+internal/helper/filesystem_linux_test.go:540:45: undefined: syscall
+internal/helper/filesystem_linux_test.go:541:60: undefined: syscall
+ok  	github.com/hyzorax/hyzorax-control/cmd/hyzorax-control	0.392s
+?   	github.com/hyzorax/hyzorax-control/cmd/hyzorax-control-helper	[no test files]
+ok  	github.com/hyzorax/hyzorax-control/internal/config	0.006s
+ok  	github.com/hyzorax/hyzorax-control/internal/cryptoutil	0.459s
+FAIL	github.com/hyzorax/hyzorax-control/internal/helper [build failed]
+ok  	github.com/hyzorax/hyzorax-control/internal/httpapi	0.700s
+ok  	github.com/hyzorax/hyzorax-control/internal/store	0.076s
+?   	github.com/hyzorax/hyzorax-control/internal/systeminfo	[no test files]
+ok  	github.com/hyzorax/hyzorax-control/internal/web	0.003s
+FAIL
