@@ -35,8 +35,9 @@ jobs:
       - name: Apply V1.5.1 UI refinement
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.5.1/apply.py
+          python3 -m py_compile release-patch/v1.5.1/apply.py release-patch/v1.5.1/finalize.py
           python3 release-patch/v1.5.1/apply.py work/hyzorax-control
+          python3 release-patch/v1.5.1/finalize.py work/hyzorax-control
 
       - name: Static UI checks
         run: |
@@ -51,6 +52,9 @@ jobs:
           grep -q 'action-menu-trigger' internal/web/static/app.js
           grep -q 'file-action-menu' internal/web/static/app.js
           grep -q 'operation-modal' internal/web/static/index.html
+          grep -q 'Guarded rename' internal/web/static/index.html
+          grep -q 'Guarded copy' internal/web/static/index.html
+          grep -q 'Guarded move' internal/web/static/index.html
           grep -q 'body.file-action-menu-open::after' internal/web/static/app.css
           grep -q 'api/v1/files/copy' internal/web/static/app.js
           grep -q 'api/v1/files/move' internal/web/static/app.js
