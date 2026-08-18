@@ -1,0 +1,6 @@
+status=failed
+version=1.5.0
+features=guarded-rename,guarded-copy,guarded-move
+helper_protocol=7
+validated_commit=354e048b88760ea574d6a2eefc8e90956cdaa22d
+failed_at=2026-08-18T21:22:26Z
