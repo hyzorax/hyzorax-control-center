@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-PRODUCT="HYZoraX Control Center"
+PRODUCT="HYZoraX Control Panel"
 SUPPORTED_OS_ID="ubuntu"
 SUPPORTED_OS_VERSION="24.04"
 REPOSITORY="hyzorax/hyzorax-control-center"
@@ -141,23 +141,12 @@ fi
 echo "Installing ${PRODUCT} v${control_version}..."
 cd "${build_dir}"
 
-# Keep the installer output readable. OpenSSL can emit very long entropy/key
-# generation progress lines made only of punctuation; collapse those into one
-# branded status line while preserving all real bootstrap messages and errors.
+# Bootstrap prints the branded HYZORAX TLS banner itself. Suppress only noisy
+# OpenSSL punctuation/progress lines while preserving real status and errors.
 ./bootstrap.sh 2>&1 | awk '
-  BEGIN { shown_tls_progress = 0 }
   {
-    if (length($0) > 80 && $0 !~ /[[:alnum:]_\/:]/ && $0 ~ /[+*]/) {
-      if (!shown_tls_progress) {
-        print "[HYZORAX] Generating secure TLS material..."
-        fflush()
-        shown_tls_progress = 1
-      }
-      next
-    }
-    if ($0 == "-----") {
-      next
-    }
+    if (length($0) > 80 && $0 !~ /[[:alnum:]_\/:]/ && $0 ~ /[+*]/) next
+    if ($0 == "-----") next
     print
     fflush()
   }
