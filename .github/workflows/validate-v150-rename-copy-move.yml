@@ -1,4 +1,4 @@
-name: Validate V1.5.0 rename copy move
+name: Validate and release V1.5.0 rename copy move
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  validate:
+  validate-release:
     if: github.event_name != 'issues' || github.event.issue.title == 'HYZoraX V1.5.0 Rename Copy Move Validation Trigger'
     runs-on: ubuntu-24.04
     steps:
@@ -25,7 +25,7 @@ jobs:
       - name: Download V1.4.4 source release
         run: |
           set -Eeuo pipefail
-          echo download-base > /tmp/hyzorax-validation-stage
+          echo download-base > /tmp/hyzorax-v150-stage
           mkdir -p work
           curl -fL --retry 3 \
             https://github.com/hyzorax/hyzorax-control-center/releases/download/v1.4.4/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
@@ -36,7 +36,7 @@ jobs:
       - name: Reassemble V1.5.0 patches
         run: |
           set -Eeuo pipefail
-          echo reassemble-patches > /tmp/hyzorax-validation-stage
+          echo reassemble-patches > /tmp/hyzorax-v150-stage
           for feature in rename copy move; do
             base64 -d "release-patch/v1.5.0/guarded-${feature}.patch.gz.b64" > "/tmp/${feature}.patch.gz"
             gzip -dc "/tmp/${feature}.patch.gz" > "/tmp/${feature}.patch"
@@ -52,7 +52,7 @@ jobs:
       - name: Apply V1.5.0 guarded patches
         run: |
           set -Eeuo pipefail
-          echo apply-patches > /tmp/hyzorax-validation-stage
+          echo apply-patches > /tmp/hyzorax-v150-stage
           {
             patch --batch -p1 -d work/hyzorax-control < /tmp/rename.patch
             patch --batch -p1 -d work/hyzorax-control < /tmp/copy.patch
@@ -63,7 +63,7 @@ jobs:
       - name: Static syntax and feature checks
         run: |
           set -Eeuo pipefail
-          echo static-checks > /tmp/hyzorax-validation-stage
+          echo static-checks > /tmp/hyzorax-v150-stage
           cd work/hyzorax-control
           {
             gofmt -w internal/helper/filesystem_linux.go internal/helper/filesystem_linux_test.go internal/helper/protocol.go internal/helper/server_linux.go internal/httpapi/app.go internal/httpapi/app_test.go internal/httpapi/files_test.go internal/httpapi/handlers.go internal/web/assets_test.go
@@ -89,21 +89,21 @@ jobs:
       - name: Test
         run: |
           set -Eeuo pipefail
-          echo go-test > /tmp/hyzorax-validation-stage
+          echo go-test > /tmp/hyzorax-v150-stage
           cd work/hyzorax-control
           go test ./... 2>&1 | tee /tmp/go-test.log
 
       - name: Vet
         run: |
           set -Eeuo pipefail
-          echo go-vet > /tmp/hyzorax-validation-stage
+          echo go-vet > /tmp/hyzorax-v150-stage
           cd work/hyzorax-control
           go vet ./... 2>&1 | tee /tmp/go-vet.log
 
-      - name: Build validation package
+      - name: Build and verify V1.5.0
         run: |
           set -Eeuo pipefail
-          echo build > /tmp/hyzorax-validation-stage
+          echo build > /tmp/hyzorax-v150-stage
           cd work/hyzorax-control
           {
             make clean
@@ -113,7 +113,32 @@ jobs:
             (cd build && sha256sum -c SHA256SUMS)
           } 2>&1 | tee /tmp/build.log
 
-      - name: Record successful validation
+      - name: Package V1.5.0 assets
+        if: github.event_name == 'issues'
+        run: |
+          set -Eeuo pipefail
+          echo package > /tmp/hyzorax-v150-stage
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          cut -d' ' -f1 HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 > /tmp/v150.sha
+
+      - name: Publish V1.5.0
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          echo publish > /tmp/hyzorax-v150-stage
+          gh release delete v1.5.0 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.5.0 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.5.0' \
+            --notes 'File Manager guarded operations release: safe Rename, recursive guarded Copy, and atomic same-filesystem Move. Rename/Move use RENAME_NOREPLACE to prevent overwrites. Copy rejects symlinks, special files, mount-boundary trees, oversized copies, descendant copies, and cleans partial staging on failure. Cross-filesystem Move remains denied by design until destructive recovery/rollback is implemented. Helper protocol V7.' \
+            --latest
+
+      - name: Record successful validation and release
         if: success()
         run: |
           set -Eeuo pipefail
@@ -127,26 +152,35 @@ jobs:
             echo "validated_commit=${GITHUB_SHA}"
             echo "validated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > release-status/v1.5.0-rename-copy-move-validation.txt
-          rm -f release-status/v1.5.0-rename-copy-move-validation-failed.txt
-          git config user.name 'HYZoraX Validation Bot'
-          git config user.email 'validation-bot@hyzorax.invalid'
-          git add release-status/v1.5.0-rename-copy-move-validation.txt release-status/v1.5.0-rename-copy-move-validation-failed.txt 2>/dev/null || true
-          git commit -m 'Record V1.5.0 rename copy move validation' || exit 0
+          if [[ "${GITHUB_EVENT_NAME}" == issues ]]; then
+            {
+              echo 'status=success'
+              echo 'version=1.5.0'
+              echo 'features=guarded-rename,guarded-copy,guarded-move'
+              echo 'helper_protocol=7'
+              echo 'cross_filesystem_move=denied-by-design'
+              printf 'archive_sha256='; cat /tmp/v150.sha
+              echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            } > release-status/v1.5.0.txt
+          fi
+          rm -f release-status/v1.5.0-rename-copy-move-validation-failed.txt release-status/v1.5.0-failed.txt
+          git config user.name 'HYZoraX Release Bot'
+          git config user.email 'release-bot@hyzorax.invalid'
+          git add release-status/v1.5.0-rename-copy-move-validation.txt release-status/v1.5.0.txt release-status/v1.5.0-rename-copy-move-validation-failed.txt release-status/v1.5.0-failed.txt 2>/dev/null || true
+          git commit -m 'Record V1.5.0 validated release' || exit 0
           git push
 
-      - name: Record failed validation with diagnostics
+      - name: Record failed V1.5.0 run with diagnostics
         if: failure()
         run: |
           set +e
           mkdir -p release-status
-          status_file=release-status/v1.5.0-rename-copy-move-validation-failed.txt
+          status_file=release-status/v1.5.0-failed.txt
           {
             echo 'status=failed'
             echo 'version=1.5.0'
-            echo 'features=guarded-rename,guarded-copy,guarded-move'
-            echo 'helper_protocol=7'
-            printf 'failure_stage='; cat /tmp/hyzorax-validation-stage 2>/dev/null || echo unknown
-            echo "validated_commit=${GITHUB_SHA}"
+            printf 'failure_stage='; cat /tmp/hyzorax-v150-stage 2>/dev/null || echo unknown
+            echo "failed_commit=${GITHUB_SHA}"
             echo "failed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             for log in /tmp/patch.log /tmp/static.log /tmp/go-test.log /tmp/go-vet.log /tmp/build.log; do
               if [[ -s "$log" ]]; then
@@ -156,137 +190,8 @@ jobs:
               fi
             done
           } > "$status_file"
-          git config user.name 'HYZoraX Validation Bot'
-          git config user.email 'validation-bot@hyzorax.invalid'
+          git config user.name 'HYZoraX Release Bot'
+          git config user.email 'release-bot@hyzorax.invalid'
           git add "$status_file"
-          git commit -m 'Record diagnostic V1.5.0 validation failure' || exit 0
-          git push || true
-
-  release-v150:
-    if: github.event_name == 'issues' && github.event.issue.title == 'HYZoraX V1.5.0 Build Trigger'
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Require successful V1.5.0 validation
-        run: |
-          set -Eeuo pipefail
-          status_file='release-status/v1.5.0-rename-copy-move-validation.txt'
-          test -f "$status_file"
-          grep -qx 'status=success' "$status_file"
-          grep -qx 'version=1.5.0' "$status_file"
-          grep -qx 'features=guarded-rename,guarded-copy,guarded-move' "$status_file"
-          grep -qx 'helper_protocol=7' "$status_file"
-          grep -qx 'cross_filesystem_move=denied-by-design' "$status_file"
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25.8'
-          cache: false
-
-      - name: Download V1.4.4 source release
-        run: |
-          set -Eeuo pipefail
-          mkdir -p work
-          curl -fL --retry 3 \
-            https://github.com/hyzorax/hyzorax-control-center/releases/download/v1.4.4/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
-            -o /tmp/base.tar.gz
-          tar -xzf /tmp/base.tar.gz -C work
-          test -d work/hyzorax-control
-
-      - name: Reassemble and apply V1.5.0 patches
-        run: |
-          set -Eeuo pipefail
-          for feature in rename copy move; do
-            base64 -d "release-patch/v1.5.0/guarded-${feature}.patch.gz.b64" > "/tmp/${feature}.patch.gz"
-            gzip -dc "/tmp/${feature}.patch.gz" > "/tmp/${feature}.patch"
-            test -s "/tmp/${feature}.patch"
-          done
-          patch --batch -p1 -d work/hyzorax-control < /tmp/rename.patch
-          patch --batch -p1 -d work/hyzorax-control < /tmp/copy.patch
-          patch --batch -p1 -d work/hyzorax-control < /tmp/move.patch
-          patch --batch -p1 -d work/hyzorax-control < release-patch/v1.5.0/guarded-move-test-import.patch
-
-      - name: Verify, test and vet
-        run: |
-          set -Eeuo pipefail
-          cd work/hyzorax-control
-          gofmt -w internal/helper/filesystem_linux.go internal/helper/filesystem_linux_test.go internal/helper/protocol.go internal/helper/server_linux.go internal/httpapi/app.go internal/httpapi/app_test.go internal/httpapi/files_test.go internal/httpapi/handlers.go internal/web/assets_test.go
-          node --check internal/web/static/app.js
-          bash -n packaging/bootstrap.sh
-          bash -n packaging/hyzorax-control-tls
-          bash -n packaging/hyzorax-control-updater
-          bash -n packaging/hz
-          grep -q 'const ProtocolVersion = 7' internal/helper/protocol.go
-          grep -q 'Version 1.5.0' internal/web/static/index.html
-          go test ./...
-          go vet ./...
-
-      - name: Build and verify release
-        run: |
-          set -Eeuo pipefail
-          cd work/hyzorax-control
-          make clean
-          make release VERSION=1.5.0
-          ./build/hyzorax-control -version | grep -q '1.5.0'
-          ./build/hyzorax-control-helper -version | grep -q '1.5.0'
-          (cd build && sha256sum -c SHA256SUMS)
-
-      - name: Package stable assets
-        run: |
-          set -Eeuo pipefail
-          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
-          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
-          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
-          cut -d' ' -f1 HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 > /tmp/v150.sha
-
-      - name: Publish V1.5.0
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -Eeuo pipefail
-          gh release delete v1.5.0 --yes --cleanup-tag 2>/dev/null || true
-          gh release create v1.5.0 \
-            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
-            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
-            --title 'HYZoraX Control Panel V1.5.0' \
-            --notes 'File Manager guarded operations release: safe Rename, recursive guarded Copy, and atomic same-filesystem Move. Rename/Move use RENAME_NOREPLACE to prevent overwrites. Copy rejects symlinks, special files, mount-boundary trees, oversized copies, descendant copies, and cleans partial staging on failure. Cross-filesystem Move remains denied by design until destructive recovery/rollback is implemented. Helper protocol V7.' \
-            --latest
-
-      - name: Record successful V1.5.0 release
-        run: |
-          set -Eeuo pipefail
-          mkdir -p release-status
-          {
-            echo 'status=success'
-            echo 'version=1.5.0'
-            echo 'features=guarded-rename,guarded-copy,guarded-move'
-            echo 'helper_protocol=7'
-            echo 'cross_filesystem_move=denied-by-design'
-            printf 'archive_sha256='; cat /tmp/v150.sha
-            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } > release-status/v1.5.0.txt
-          rm -f release-status/v1.5.0-failed.txt
-          git config user.name 'HYZoraX Release Bot'
-          git config user.email 'release-bot@hyzorax.invalid'
-          git add release-status/v1.5.0.txt release-status/v1.5.0-failed.txt 2>/dev/null || true
-          git commit -m 'Record V1.5.0 release status' || exit 0
-          git push
-
-      - name: Record failed V1.5.0 release
-        if: failure()
-        run: |
-          set +e
-          mkdir -p release-status
-          {
-            echo 'status=failed'
-            echo 'version=1.5.0'
-            echo "failed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } > release-status/v1.5.0-failed.txt
-          git config user.name 'HYZoraX Release Bot'
-          git config user.email 'release-bot@hyzorax.invalid'
-          git add release-status/v1.5.0-failed.txt
-          git commit -m 'Record V1.5.0 failed release' || exit 0
+          git commit -m 'Record failed V1.5.0 release run' || exit 0
           git push || true
