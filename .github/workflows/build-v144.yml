@@ -1,0 +1,125 @@
+name: Build and release V1.4.4
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-v144.yml'
+      - 'release-patch/v1.4.4/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+
+      - name: Download V1.4.3 source release
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          curl -fL --retry 3 \
+            https://github.com/hyzorax/hyzorax-control-center/releases/download/v1.4.3/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            -o /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+
+      - name: Apply V1.4.4 installer readiness hotfix
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.4.4/apply.py
+          python3 release-patch/v1.4.4/apply.py work/hyzorax-control
+
+      - name: Static syntax checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hyzorax-control-tls
+          bash -n packaging/hyzorax-control-updater
+          bash -n packaging/hz
+          node --check internal/web/static/app.js
+          grep -q 'wait_for_host_package_manager' packaging/bootstrap.sh
+          grep -q 'install_completed=true' packaging/bootstrap.sh
+          grep -q 'Version 1.4.4' internal/web/static/index.html
+
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+
+      - name: Build release
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.4.4
+          ./build/hyzorax-control -version
+          ./build/hyzorax-control-helper -version
+          (cd build && sha256sum -c SHA256SUMS)
+
+      - name: Package stable assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          cut -d' ' -f1 HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 > /tmp/v144.sha
+
+      - name: Publish V1.4.4
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.4.4 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.4.4 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.4.4' \
+            --notes 'Installer readiness hotfix: waits for fresh-Ubuntu apt/dpkg transactions before launching the transient installer worker, suppresses transient D-Bus status errors, prevents interrupted workers from publishing false success, and still requires trusted IP TLS to be issued and browser-verified before installation completes.' \
+            --latest
+
+      - name: Record successful release
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release-status
+          {
+            echo 'status=success'
+            echo 'version=1.4.4'
+            printf 'archive_sha256='; cat /tmp/v144.sha
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > release-status/v1.4.4.txt
+          rm -f release-status/v1.4.4-failed.txt
+          git config user.name 'hyzorax'
+          git config user.email 'hyzorax@gmail.com'
+          git add release-status/v1.4.4.txt release-status/v1.4.4-failed.txt 2>/dev/null || true
+          git commit -m 'Record V1.4.4 release status' || exit 0
+          git push
+
+      - name: Record failed build
+        if: failure()
+        run: |
+          set +e
+          mkdir -p release-status
+          {
+            echo 'status=failed'
+            echo 'version=1.4.4'
+            echo "failed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > release-status/v1.4.4-failed.txt
+          git config user.name 'hyzorax'
+          git config user.email 'hyzorax@gmail.com'
+          git add release-status/v1.4.4-failed.txt
+          git commit -m 'Record V1.4.4 failed build' || exit 0
+          git push || true
