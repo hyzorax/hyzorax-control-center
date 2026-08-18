@@ -1,0 +1,95 @@
+name: Build and release V1.5.1 File Manager UI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build-v151:
+    if: github.event.pull_request.head.ref == 'agent/v1.5.1-ui-refine'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+
+      - name: Download V1.5.0 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.5.0 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+
+      - name: Apply V1.5.1 UI refinement
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.5.1/apply.py
+          python3 release-patch/v1.5.1/apply.py work/hyzorax-control
+
+      - name: Static UI checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hyzorax-control-tls
+          bash -n packaging/hyzorax-control-updater
+          bash -n packaging/hz
+          grep -q 'Version 1.5.1' internal/web/static/index.html
+          grep -q 'action-menu-trigger' internal/web/static/app.js
+          grep -q 'file-action-menu' internal/web/static/app.js
+          grep -q 'operation-modal' internal/web/static/index.html
+          grep -q 'body.file-action-menu-open::after' internal/web/static/app.css
+          grep -q 'api/v1/files/copy' internal/web/static/app.js
+          grep -q 'api/v1/files/move' internal/web/static/app.js
+          grep -q 'api/v1/files/rename' internal/web/static/app.js
+          grep -q 'const ProtocolVersion = 7' internal/helper/protocol.go
+
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+
+      - name: Build and verify V1.5.1
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.5.1
+          ./build/hyzorax-control -version | grep -q '1.5.1'
+          ./build/hyzorax-control-helper -version | grep -q '1.5.1'
+          (cd build && sha256sum -c SHA256SUMS)
+
+      - name: Package release assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+
+      - name: Publish V1.5.1 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.5.1 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.5.1 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.5.1' \
+            --notes 'File Manager UI refinement. Replaces per-row Download/Edit/Copy/Move/Rename button clusters with one compact actions trigger. Desktop/tablet use a floating actions menu; mobile uses a bottom-sheet action menu. Rename, Copy and Move dialogs are compact while retaining the existing guarded V7 backend behavior. No backend API or security-policy relaxation.' \
+            --latest
