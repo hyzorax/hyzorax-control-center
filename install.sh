@@ -141,12 +141,3 @@ fi
 echo "Installing ${PRODUCT} v${control_version}..."
 cd "${build_dir}"
 ./bootstrap.sh
-
-echo
-printf '%s\n' "${PRODUCT} v${control_version} installation completed."
-if command -v hz >/dev/null 2>&1; then
-  echo
-  hz status || true
-  echo
-  hz url || true
-fi
