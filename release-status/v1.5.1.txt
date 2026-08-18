@@ -1,0 +1,11 @@
+status=success
+version=1.5.1
+scope=file-manager-ui-refinement
+features=compact-actions-menu,desktop-dropdown,mobile-bottom-sheet,compact-operation-dialogs
+helper_protocol=7
+backend_guards=unchanged
+release_run_id=32195157715
+release_job_id=95897541852
+release_tag=v1.5.1
+checksum_asset=HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+built_at=2026-08-18T22:59:56Z
