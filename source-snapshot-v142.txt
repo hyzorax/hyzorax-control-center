@@ -1364,6 +1364,216 @@ cd "${build_dir}"
 
 echo "[HYZoraX Update] Update completed successfully."
 
+========== FILE: packaging/config.toml ==========
+[server]
+listen = "0.0.0.0:9443"
+tls_cert = "/etc/hyzorax-control/tls/panel.crt"
+tls_key = "/etc/hyzorax-control/tls/panel.key"
+allow_insecure_http = false
+
+[storage]
+database = "/var/lib/hyzorax-control/panel.sqlite"
+
+[security]
+encryption_key_file = "/etc/hyzorax-control/panel.key"
+entrance_code_file = "/etc/hyzorax-control/entrance.code"
+session_ttl = "30m"
+secure_cookies = true
+
+[helper]
+socket = "/run/hyzorax-control/helper.sock"
+
+========== FILE: internal/web/static/index.html ==========
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#f6f9fd">
+    <title>HYZoraX Control Center</title>
+    <link rel="stylesheet" href="assets/app.css">
+    <script src="assets/app.js" defer></script>
+  </head>
+  <body>
+    <div class="backdrop" aria-hidden="true"></div>
+
+    <main id="gate" class="gate shell" hidden>
+      <section class="brand-panel">
+        <div class="brand-mark" aria-hidden="true"><img src="assets/hyzorax-logo.png" alt=""></div>
+        <p class="eyebrow">HYZoraX</p>
+        <h1>Server control,<br><span>without fragile dependencies.</span></h1>
+        <p class="lead">A standalone management plane designed to stay available when the application stack is not.</p>
+      </section>
+
+      <section class="auth-panel">
+        <div class="auth-card">
+          <div class="auth-heading">
+            <span class="status-dot"></span>
+            <span id="gate-label">Secure access</span>
+          </div>
+
+          <form id="login-form" class="stack" hidden>
+            <div>
+              <p class="eyebrow">Administrator access</p>
+              <h2>Welcome back</h2>
+              <p class="muted">Sign in as hyzorax with the initial 8-character password shown when installation completed.</p>
+            </div>
+            <label>Username<input name="username" autocomplete="username" minlength="3" maxlength="32" required></label>
+            <label>Password
+              <span class="password-input">
+                <input name="password" type="password" autocomplete="current-password" minlength="8" maxlength="16" required>
+                <button class="password-toggle" type="button" data-password-toggle aria-label="Show password" title="Show password">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>
+                </button>
+              </span>
+            </label>
+            <button class="primary" type="submit">Sign in securely</button>
+          </form>
+
+          <div id="gate-error" class="alert" role="alert" hidden></div>
+        </div>
+        <p class="footer-line">SMART PLATFORM. SMART BUSINESS.</p>
+      </section>
+    </main>
+
+    <div id="app" class="app-shell" hidden>
+      <aside class="sidebar">
+        <a class="logo" href="./" aria-label="HYZoraX Control Center">
+          <span class="brand-mark small"><img src="assets/hyzorax-logo.png" alt=""></span>
+          <span><strong>HYZoraX</strong><small>CONTROL CENTER</small></span>
+        </a>
+        <nav>
+          <p>Workspace</p>
+          <a class="active" href="#overview" data-view="overview"><span>◫</span>Overview</a>
+          <a href="#security"><span>◇</span>Security <em>Soon</em></a>
+          <a href="#applications"><span>⬡</span>Applications <em>Soon</em></a>
+          <a href="#services"><span>◉</span>Services <em>Soon</em></a>
+          <a href="#files" data-view="files"><span>□</span>File Manager <em>Guarded</em></a>
+          <p>Infrastructure</p>
+          <a href="#domains"><span>◎</span>Domains &amp; SSL <em>Soon</em></a>
+          <a href="#databases"><span>▥</span>Databases <em>Soon</em></a>
+          <a href="#backups"><span>↻</span>Backups <em>Soon</em></a>
+          <a href="#audit"><span>≡</span>Audit <em>Soon</em></a>
+        </nav>
+        <div class="sidebar-foot"><span class="status-dot"></span><div><strong>Version 1.4.2</strong><small>Management plane online</small></div></div>
+      </aside>
+
+      <main class="workspace">
+        <header>
+          <button id="menu-button" class="icon-button" aria-label="Toggle navigation">☰</button>
+          <div><p id="workspace-eyebrow" class="eyebrow">Control plane</p><h2 id="workspace-title">System overview</h2></div>
+          <div class="header-actions">
+            <span class="secure-pill"><span class="status-dot"></span>TLS protected</span>
+            <button id="update-button" class="ghost compact update-button" type="button" title="Check for Control Center updates">Update</button>
+            <button id="refresh-button" class="icon-button" title="Refresh">↻</button>
+            <div class="user-chip"><span id="user-initial">H</span><div><strong id="user-name">Owner</strong><small>Owner</small></div></div>
+            <button id="logout-button" class="ghost compact">Sign out</button>
+          </div>
+        </header>
+
+        <section id="overview-view" class="content">
+          <div class="hero-row">
+            <div><p class="eyebrow">Live server health</p><h1 id="hostname">Loading server…</h1><p id="platform" class="muted">Collecting operating system details</p></div>
+            <div id="collection-time" class="updated">Waiting for first sample</div>
+          </div>
+
+          <div class="metric-grid">
+            <article class="metric-card"><div><span>CPU</span><strong id="cpu-value">—</strong></div><div class="meter"><i id="cpu-meter"></i></div><small id="cpu-detail">Collecting…</small></article>
+            <article class="metric-card"><div><span>Memory</span><strong id="memory-value">—</strong></div><div class="meter"><i id="memory-meter"></i></div><small id="memory-detail">Collecting…</small></article>
+            <article class="metric-card"><div><span>Disk</span><strong id="disk-value">—</strong></div><div class="meter"><i id="disk-meter"></i></div><small id="disk-detail">Collecting…</small></article>
+            <article class="metric-card accent"><div><span>Uptime</span><strong id="uptime-value">—</strong></div><small id="load-detail">Collecting load averages…</small></article>
+          </div>
+
+          <div class="panel-grid">
+            <article class="panel">
+              <div class="panel-heading"><div><p class="eyebrow">Trusted boundary</p><h3>Privileged helper</h3></div><span id="helper-badge" class="badge neutral">Checking</span></div>
+              <div class="helper-visual"><div class="node"><small>WEB SERVICE</small><strong>Non-root Go process</strong></div><span>Unix socket</span><div class="node"><small>ROOT HELPER</small><strong>Allow-listed API</strong></div></div>
+              <p id="helper-detail" class="muted">Verifying peer-authenticated handshake…</p>
+            </article>
+            <article class="panel">
+              <div class="panel-heading"><div><p class="eyebrow">Traffic totals</p><h3>Network</h3></div><span class="badge">All interfaces</span></div>
+              <div class="network-row"><div><small>RECEIVED</small><strong id="network-rx">—</strong></div><div><small>SENT</small><strong id="network-tx">—</strong></div></div>
+              <p class="muted">Loopback traffic is excluded from this summary.</p>
+            </article>
+          </div>
+
+          <div id="app-error" class="alert" role="alert" hidden></div>
+        </section>
+
+        <section id="files-view" class="content" hidden>
+          <div class="files-heading">
+            <div><p class="eyebrow">Safe filesystem access</p><h1>File Manager</h1><p class="muted">Browse, upload and edit guarded server files without exposing a browser terminal.</p></div>
+            <span class="badge good">Guarded write access</span>
+          </div>
+
+          <form id="file-path-form" class="path-bar">
+            <button id="file-up-button" class="icon-button" type="button" title="Parent directory" aria-label="Open parent directory">↑</button>
+            <label class="path-field"><span>Absolute path</span><input id="file-path-input" name="path" value="/" autocomplete="off" spellcheck="false" required></label>
+            <button class="primary compact-primary" type="submit">Open</button>
+          </form>
+
+          <div id="file-breadcrumbs" class="breadcrumbs" aria-label="Current filesystem path"></div>
+
+          <div class="file-toolbar">
+            <div>
+              <button id="new-folder-button" class="tool-button" type="button">＋ New folder</button>
+              <button id="upload-button" class="tool-button" type="button">⇧ Upload file</button>
+              <input id="upload-file-input" type="file" hidden>
+            </div>
+            <small>New items never overwrite existing paths.</small>
+          </div>
+
+          <article class="file-panel">
+            <div class="file-panel-head">
+              <div><strong id="file-current-path">/</strong><small id="file-status">Loading filesystem…</small></div>
+              <span class="badge">16 MB download limit</span>
+            </div>
+            <div class="file-table-wrap">
+              <table class="file-table">
+                <thead><tr><th>Name</th><th>Size</th><th>Owner</th><th>Permissions</th><th>Modified</th><th>Action</th></tr></thead>
+                <tbody id="file-rows"></tbody>
+              </table>
+            </div>
+            <div id="file-empty" class="file-empty" hidden>This directory is empty.</div>
+          </article>
+          <div id="file-error" class="alert" role="alert" hidden></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="folder-dialog" class="modal">
+      <form id="folder-form" class="modal-card">
+        <div><p class="eyebrow">Guarded create</p><h3>Create a new folder</h3><p class="muted">Inside <code id="folder-parent-path">/</code></p></div>
+        <label>Folder name<input id="folder-name-input" name="name" maxlength="255" autocomplete="off" required></label>
+        <p class="modal-note">The folder will inherit the parent owner and group. Existing paths are never replaced.</p>
+        <div class="modal-actions"><button type="button" class="ghost compact" data-close-dialog>Cancel</button><button type="submit" class="primary compact-primary">Create folder</button></div>
+        <div id="folder-error" class="alert" role="alert" hidden></div>
+      </form>
+    </dialog>
+
+    <dialog id="upload-dialog" class="modal">
+      <form id="upload-form" class="modal-card">
+        <div><p class="eyebrow">Guarded upload</p><h3>Upload a new file</h3><p class="muted">Destination: <code id="upload-parent-path">/</code></p></div>
+        <label>File name<input id="upload-name-input" name="name" maxlength="255" autocomplete="off" required></label>
+        <p id="upload-file-detail" class="modal-note">Choose a file up to 8 MB.</p>
+        <div class="modal-actions"><button type="button" class="ghost compact" data-close-dialog>Cancel</button><button type="submit" class="primary compact-primary">Upload file</button></div>
+        <div id="upload-error" class="alert" role="alert" hidden></div>
+      </form>
+    </dialog>
+
+    <dialog id="editor-dialog" class="modal wide">
+      <form id="editor-form" class="modal-card">
+        <div><p class="eyebrow">Guarded text editor</p><h3>Edit text file</h3><p class="muted"><code id="editor-path"></code></p></div>
+        <label>UTF-8 text<textarea id="editor-content" name="content" spellcheck="false"></textarea></label>
+        <p class="modal-note">Maximum 1 MB. If the file changes elsewhere after opening, saving is rejected until you reopen it.</p>
+        <div class="modal-actions"><button type="button" class="ghost compact" data-close-dialog>Cancel</button><button type="submit" class="primary compact-primary">Save changes</button></div>
+        <div id="editor-error" class="alert" role="alert" hidden></div>
+      </form>
+    </dialog>
+  </body>
+</html>
+
 ========== FILE: internal/web/static/app.js ==========
 "use strict";
 const state = {
@@ -2197,4 +2407,626 @@ header h2 { margin: 0; font-size: 1rem; }
 
 .update-button { min-width: 82px; white-space: nowrap; font-weight: 800; }
 .update-button.available { border-color: #67bfff; background: linear-gradient(135deg, rgba(104,221,239,.18), rgba(48,116,238,.12)); color: #075cd6; }
+
+========== FILE: internal/httpapi/update.go ==========
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/hyzorax/hyzorax-control/internal/cryptoutil"
+	"github.com/hyzorax/hyzorax-control/internal/helper"
+)
+
+const latestReleaseAPI = "https://api.github.com/repos/hyzorax/hyzorax-control-center/releases/latest"
+
+type githubRelease struct {
+	TagName string `json:"tag_name"`
+}
+
+func (a *App) handleUpdateStatus(writer http.ResponseWriter, request *http.Request) {
+	latest, err := fetchLatestReleaseVersion(request.Context())
+	if err != nil {
+		a.logger.Printf("update status request_id=%s error=%v", requestID(request.Context()), err)
+		writeError(writer, http.StatusServiceUnavailable, "update_check_failed", "Latest HYZoraX release could not be checked right now.")
+		return
+	}
+	current := strings.TrimPrefix(a.version, "v")
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"current_version":  current,
+		"latest_version":   latest,
+		"update_available": compareVersions(latest, current) > 0,
+	})
+}
+
+func (a *App) handleUpdateApply(writer http.ResponseWriter, request *http.Request) {
+	session := currentSession(request.Context())
+	callID, err := cryptoutil.RandomID()
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "update_unavailable", "Update job identity could not be created.")
+		return
+	}
+	response, err := a.helper.Call(request.Context(), helper.Request{
+		ID: callID, CorrelationID: requestID(request.Context()), ActorID: session.User.ID, Action: "panel.update",
+	})
+	if err != nil {
+		a.audit(request, "panel.update", "control-center", "helper_unavailable", nil)
+		writeError(writer, http.StatusServiceUnavailable, "helper_unavailable", "Privileged helper is unavailable.")
+		return
+	}
+	if !response.OK || response.Error != nil {
+		code, message := "update_start_failed", "Control Center update could not be started."
+		if response.Error != nil {
+			code, message = response.Error.Code, response.Error.Message
+		}
+		a.audit(request, "panel.update", "control-center", "failed", map[string]any{"code": code})
+		writeError(writer, http.StatusBadGateway, code, message)
+		return
+	}
+	a.audit(request, "panel.update", "control-center", "started", map[string]any{"unit": response.Data["unit"]})
+	writeJSON(writer, http.StatusAccepted, response.Data)
+}
+
+func fetchLatestReleaseVersion(parent context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 6*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseAPI, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "HYZoraX-Control-Center")
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return "", errors.New("GitHub latest release request failed")
+	}
+	var release githubRelease
+	if err := json.NewDecoder(response.Body).Decode(&release); err != nil {
+		return "", err
+	}
+	version := strings.TrimPrefix(strings.TrimSpace(release.TagName), "v")
+	if _, ok := parseVersion(version); !ok {
+		return "", errors.New("GitHub latest release tag is invalid")
+	}
+	return version, nil
+}
+
+func compareVersions(left, right string) int {
+	l, lok := parseVersion(left)
+	r, rok := parseVersion(right)
+	if !lok || !rok {
+		return strings.Compare(left, right)
+	}
+	for i := range l {
+		if l[i] < r[i] {
+			return -1
+		}
+		if l[i] > r[i] {
+			return 1
+		}
+	}
+	return 0
+}
+
+func parseVersion(value string) ([3]int, bool) {
+	var parsed [3]int
+	base := strings.SplitN(strings.TrimPrefix(value, "v"), "-", 2)[0]
+	parts := strings.Split(base, ".")
+	if len(parts) != 3 {
+		return parsed, false
+	}
+	for index, part := range parts {
+		number, err := strconv.Atoi(part)
+		if err != nil || number < 0 {
+			return parsed, false
+		}
+		parsed[index] = number
+	}
+	return parsed, true
+}
+
+========== FILE: internal/httpapi/handlers.go ==========
+package httpapi
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"mime"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/hyzorax/hyzorax-control/internal/cryptoutil"
+	"github.com/hyzorax/hyzorax-control/internal/helper"
+	"github.com/hyzorax/hyzorax-control/internal/store"
+	"github.com/hyzorax/hyzorax-control/internal/systeminfo"
+)
+
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+const (
+	maxUploadRequestBytes = 12 * 1024 * 1024
+	maxTextRequestBytes   = 2 * 1024 * 1024
+)
+
+type createDirectoryRequest struct {
+	Directory string `json:"directory"`
+	Name      string `json:"name"`
+}
+
+type uploadFileRequest struct {
+	Directory     string `json:"directory"`
+	Name          string `json:"name"`
+	ContentBase64 string `json:"content_base64"`
+}
+
+type textFileWriteRequest struct {
+	Path           string `json:"path"`
+	Content        string `json:"content"`
+	ExpectedSHA256 string `json:"expected_sha256"`
+}
+
+func (a *App) handleHealth(writer http.ResponseWriter, request *http.Request) {
+	ctx, cancel := contextWithTimeout(request, 2*time.Second)
+	defer cancel()
+	if err := a.store.Health(ctx); err != nil {
+		writeJSON(writer, http.StatusServiceUnavailable, map[string]any{"status": "unhealthy"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"status": "ok", "service": "hyzorax-control"})
+}
+
+func (a *App) handleLogin(writer http.ResponseWriter, request *http.Request) {
+	var input loginRequest
+	if !decodeJSON(writer, request, &input) {
+		return
+	}
+	input.Username = strings.TrimSpace(input.Username)
+	key := remoteIP(request) + "\x00" + strings.ToLower(input.Username)
+	if !a.limiter.allow(key, a.now()) {
+		a.audit(request, "auth.login", input.Username, "rate_limited", nil)
+		writeError(writer, http.StatusTooManyRequests, "login_rate_limited", "Too many login attempts. Try again later.")
+		return
+	}
+	user, err := a.store.UserByUsername(request.Context(), input.Username)
+	if err != nil {
+		_ = cryptoutil.VerifyPassword(a.dummyPasswordHash, input.Password)
+		a.audit(request, "auth.login", input.Username, "denied", nil)
+		writeError(writer, http.StatusUnauthorized, "login_failed", "Username or password is invalid.")
+		return
+	}
+	credentialsValid := user.Status == "active" && cryptoutil.VerifyPassword(user.PasswordHash, input.Password)
+	if !credentialsValid {
+		a.audit(request, "auth.login", user.ID, "denied", nil)
+		writeError(writer, http.StatusUnauthorized, "login_failed", "Username or password is invalid.")
+		return
+	}
+	if !a.issueSession(writer, request, user) {
+		return
+	}
+	a.limiter.reset(key)
+	_ = a.store.MarkLogin(request.Context(), user.ID, a.now())
+	a.auditActor(request, user.ID, "", "auth.login", user.ID, "success", nil)
+	writeJSON(writer, http.StatusOK, userPayload(user))
+}
+
+func (a *App) issueSession(writer http.ResponseWriter, request *http.Request, user store.User) bool {
+	sessionID, err := cryptoutil.RandomID()
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "session_failed", "Secure session could not be created.")
+		return false
+	}
+	sessionToken, err := cryptoutil.RandomToken(32)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "session_failed", "Secure session could not be created.")
+		return false
+	}
+	csrfToken, err := cryptoutil.RandomToken(24)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "session_failed", "Secure session could not be created.")
+		return false
+	}
+	now := a.now()
+	expires := now.Add(a.config.Security.SessionTTL)
+	userAgent := request.UserAgent()
+	if len(userAgent) > 512 {
+		userAgent = userAgent[:512]
+	}
+	if err := a.store.CreateSession(request.Context(), sessionID, user.ID, cryptoutil.TokenHash(sessionToken), cryptoutil.TokenHash(csrfToken), remoteIP(request), userAgent, now, expires); err != nil {
+		a.logger.Printf("session create request_id=%s error=%v", requestID(request.Context()), err)
+		writeError(writer, http.StatusInternalServerError, "session_failed", "Secure session could not be created.")
+		return false
+	}
+	setAuthCookies(writer, sessionToken, csrfToken, a.config.Security.SessionTTL, a.config.Security.SecureCookies, a.cookiePath)
+	return true
+}
+
+func (a *App) handleLogout(writer http.ResponseWriter, request *http.Request) {
+	session := currentSession(request.Context())
+	if err := a.store.DeleteSession(request.Context(), session.ID); err != nil {
+		a.logger.Printf("session delete request_id=%s error=%v", requestID(request.Context()), err)
+	}
+	a.audit(request, "auth.logout", session.User.ID, "success", nil)
+	clearAuthCookies(writer, a.config.Security.SecureCookies, a.cookiePath)
+	writeJSON(writer, http.StatusOK, map[string]any{"status": "signed_out"})
+}
+
+func (a *App) handleSession(writer http.ResponseWriter, request *http.Request) {
+	writeJSON(writer, http.StatusOK, userPayload(currentSession(request.Context()).User))
+}
+
+func (a *App) handleSystemSummary(writer http.ResponseWriter, request *http.Request) {
+	summary, err := systeminfo.Collect()
+	if err != nil {
+		a.logger.Printf("system summary request_id=%s error=%v", requestID(request.Context()), err)
+		writeError(writer, http.StatusServiceUnavailable, "system_metrics_unavailable", "System metrics are temporarily unavailable.")
+		return
+	}
+	writeJSON(writer, http.StatusOK, summary)
+}
+
+func (a *App) handleHelperHealth(writer http.ResponseWriter, request *http.Request) {
+	session := currentSession(request.Context())
+	callID, err := cryptoutil.RandomID()
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "helper_unavailable", "Helper identity could not be created.")
+		return
+	}
+	response, err := a.helper.Call(request.Context(), helper.Request{
+		ID: callID, CorrelationID: requestID(request.Context()), ActorID: session.User.ID, Action: "helper.ping",
+	})
+	if err != nil || !response.OK {
+		a.audit(request, "helper.ping", "privileged-helper", "failed", nil)
+		writeError(writer, http.StatusServiceUnavailable, "helper_unavailable", "Privileged helper is unavailable.")
+		return
+	}
+	a.audit(request, "helper.ping", "privileged-helper", "success", nil)
+	writeJSON(writer, http.StatusOK, map[string]any{"connected": true, "protocol": response.Data["protocol"], "status": response.Data["status"]})
+}
+
+func (a *App) handleFileList(writer http.ResponseWriter, request *http.Request) {
+	target := request.URL.Query().Get("path")
+	response, ok := a.callFilesystemHelper(writer, request, "filesystem.list", target)
+	if !ok {
+		return
+	}
+	entryCount := 0
+	if entries, valid := response.Data["entries"].([]any); valid {
+		entryCount = len(entries)
+	}
+	canonicalTarget, _ := response.Data["path"].(string)
+	if canonicalTarget == "" {
+		canonicalTarget = target
+	}
+	a.audit(request, "filesystem.list", canonicalTarget, "success", map[string]any{
+		"entry_count": entryCount, "truncated": response.Data["truncated"],
+	})
+	writeJSON(writer, http.StatusOK, response.Data)
+}
+
+func (a *App) handleFileDownload(writer http.ResponseWriter, request *http.Request) {
+	target := request.URL.Query().Get("path")
+	response, ok := a.callFilesystemHelper(writer, request, "filesystem.read", target)
+	if !ok {
+		return
+	}
+	encoded, valid := response.Data["content_base64"].(string)
+	if !valid {
+		a.audit(request, "filesystem.download", target, "invalid_response", nil)
+		writeError(writer, http.StatusBadGateway, "helper_invalid_response", "Privileged helper returned an invalid file response.")
+		return
+	}
+	contents, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		a.audit(request, "filesystem.download", target, "invalid_response", nil)
+		writeError(writer, http.StatusBadGateway, "helper_invalid_response", "Privileged helper returned an invalid file response.")
+		return
+	}
+	name, _ := response.Data["name"].(string)
+	if name == "" {
+		name = filepath.Base(target)
+	}
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": name})
+	if disposition == "" {
+		disposition = "attachment"
+	}
+	canonicalTarget, _ := response.Data["path"].(string)
+	if canonicalTarget == "" {
+		canonicalTarget = target
+	}
+	a.audit(request, "filesystem.download", canonicalTarget, "success", map[string]any{"bytes": len(contents)})
+	writer.Header().Set("Content-Type", "application/octet-stream")
+	writer.Header().Set("Content-Disposition", disposition)
+	writer.Header().Set("Content-Length", strconv.Itoa(len(contents)))
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write(contents)
+}
+
+func (a *App) handleFileCreateDirectory(writer http.ResponseWriter, request *http.Request) {
+	var input createDirectoryRequest
+	if !decodeJSON(writer, request, &input) {
+		return
+	}
+	params, _ := json.Marshal(map[string]string{"name": input.Name})
+	response, ok := a.callFilesystemHelperWithParams(writer, request, "filesystem.mkdir", input.Directory, params)
+	if !ok {
+		return
+	}
+	createdPath, _ := response.Data["path"].(string)
+	a.audit(request, "filesystem.mkdir", createdPath, "success", map[string]any{"parent": input.Directory})
+	writeJSON(writer, http.StatusCreated, response.Data)
+}
+
+func (a *App) handleFileUpload(writer http.ResponseWriter, request *http.Request) {
+	var input uploadFileRequest
+	if !decodeJSONLimit(writer, request, &input, maxUploadRequestBytes) {
+		return
+	}
+	contents, err := base64.StdEncoding.DecodeString(input.ContentBase64)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_content", "Uploaded file content is invalid.")
+		return
+	}
+	if len(contents) > 8*1024*1024 {
+		writeError(writer, http.StatusRequestEntityTooLarge, "file_too_large", "File exceeds the 8 MB upload limit.")
+		return
+	}
+	input.ContentBase64 = base64.StdEncoding.EncodeToString(contents)
+	params, _ := json.Marshal(map[string]string{"name": input.Name, "content_base64": input.ContentBase64})
+	response, ok := a.callFilesystemHelperWithParams(writer, request, "filesystem.create", input.Directory, params)
+	if !ok {
+		return
+	}
+	createdPath, _ := response.Data["path"].(string)
+	a.audit(request, "filesystem.upload", createdPath, "success", map[string]any{"parent": input.Directory, "bytes": len(contents)})
+	writeJSON(writer, http.StatusCreated, response.Data)
+}
+
+func (a *App) handleTextFileRead(writer http.ResponseWriter, request *http.Request) {
+	target := request.URL.Query().Get("path")
+	response, ok := a.callFilesystemHelper(writer, request, "filesystem.text.read", target)
+	if !ok {
+		return
+	}
+	canonicalTarget, _ := response.Data["path"].(string)
+	if canonicalTarget == "" {
+		canonicalTarget = target
+	}
+	a.audit(request, "filesystem.text.read", canonicalTarget, "success", map[string]any{"bytes": response.Data["size"]})
+	writeJSON(writer, http.StatusOK, response.Data)
+}
+
+func (a *App) handleTextFileWrite(writer http.ResponseWriter, request *http.Request) {
+	var input textFileWriteRequest
+	if !decodeJSONLimit(writer, request, &input, maxTextRequestBytes) {
+		return
+	}
+	params, _ := json.Marshal(map[string]string{"content": input.Content, "expected_sha256": input.ExpectedSHA256})
+	response, ok := a.callFilesystemHelperWithParams(writer, request, "filesystem.text.write", input.Path, params)
+	if !ok {
+		return
+	}
+	canonicalTarget, _ := response.Data["path"].(string)
+	if canonicalTarget == "" {
+		canonicalTarget = input.Path
+	}
+	a.audit(request, "filesystem.text.write", canonicalTarget, "success", map[string]any{"bytes": len([]byte(input.Content))})
+	writeJSON(writer, http.StatusOK, response.Data)
+}
+
+func (a *App) callFilesystemHelper(writer http.ResponseWriter, request *http.Request, action, target string) (helper.Response, bool) {
+	return a.callFilesystemHelperWithParams(writer, request, action, target, nil)
+}
+
+func (a *App) callFilesystemHelperWithParams(writer http.ResponseWriter, request *http.Request, action, target string, params json.RawMessage) (helper.Response, bool) {
+	session := currentSession(request.Context())
+	callID, err := cryptoutil.RandomID()
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "helper_unavailable", "Helper identity could not be created.")
+		return helper.Response{}, false
+	}
+	response, err := a.helper.Call(request.Context(), helper.Request{
+		ID: callID, CorrelationID: requestID(request.Context()), ActorID: session.User.ID,
+		Action: action, Target: target, Params: params,
+	})
+	if err != nil {
+		a.audit(request, action, target, "helper_unavailable", nil)
+		writeError(writer, http.StatusServiceUnavailable, "helper_unavailable", "Privileged helper is unavailable.")
+		return helper.Response{}, false
+	}
+	if !response.OK || response.Error != nil {
+		code, message := "operation_failed", "Filesystem operation could not be completed."
+		if response.Error != nil {
+			code, message = response.Error.Code, response.Error.Message
+		}
+		a.audit(request, action, target, "denied", map[string]any{"code": code})
+		writeError(writer, filesystemHTTPStatus(code), code, message)
+		return helper.Response{}, false
+	}
+	return response, true
+}
+
+func filesystemHTTPStatus(code string) int {
+	switch code {
+	case "invalid_path", "invalid_name", "invalid_params", "invalid_content", "invalid_hash", "not_text_file", "path_traversal_denied", "not_directory", "not_regular_file":
+		return http.StatusBadRequest
+	case "path_not_found":
+		return http.StatusNotFound
+	case "path_exists", "content_conflict":
+		return http.StatusConflict
+	case "symlink_denied", "hardlink_denied", "permission_denied":
+		return http.StatusForbidden
+	case "file_too_large":
+		return http.StatusRequestEntityTooLarge
+	case "operation_timeout":
+		return http.StatusGatewayTimeout
+	case "kernel_unsupported":
+		return http.StatusNotImplemented
+	default:
+		return http.StatusBadGateway
+	}
+}
+
+func userPayload(user store.User) map[string]any {
+	return map[string]any{"id": user.ID, "username": user.Username, "role": "Owner", "mfa_enabled": user.MFAEnabled}
+}
+
+func contextWithTimeout(request *http.Request, duration time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(request.Context(), duration)
+}
+
+========== FILE: internal/httpapi/entrance.go ==========
+package httpapi
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+)
+
+const entranceCodeLength = 8
+
+func loadEntranceCode(path string) (string, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read security entrance code: %w", err)
+	}
+	code := strings.TrimSpace(string(contents))
+	if !validEntranceCode(code) {
+		return "", fmt.Errorf("security entrance code must contain exactly %d lowercase letters/numbers with at least one letter and one number", entranceCodeLength)
+	}
+	return code, nil
+}
+
+func validEntranceCode(code string) bool {
+	if len(code) != entranceCodeLength {
+		return false
+	}
+	hasLetter := false
+	hasNumber := false
+	for _, character := range code {
+		switch {
+		case character >= 'a' && character <= 'z':
+			hasLetter = true
+		case character >= '0' && character <= '9':
+			hasNumber = true
+		default:
+			return false
+		}
+	}
+	return hasLetter && hasNumber
+}
+
+func (a *App) entranceGate(next http.Handler) http.Handler {
+	prefix := a.basePath
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == prefix {
+			http.Redirect(writer, request, prefix+"/", http.StatusTemporaryRedirect)
+			return
+		}
+		if !strings.HasPrefix(request.URL.Path, prefix+"/") {
+			http.NotFound(writer, request)
+			return
+		}
+		forwarded := request.Clone(request.Context())
+		forwardedURL := *request.URL
+		forwardedURL.Path = strings.TrimPrefix(request.URL.Path, prefix)
+		if forwardedURL.Path == "" {
+			forwardedURL.Path = "/"
+		}
+		forwardedURL.RawPath = ""
+		forwarded.URL = &forwardedURL
+		next.ServeHTTP(writer, forwarded)
+	})
+}
+
+========== FILE: internal/helper/update_linux.go ==========
+//go:build linux
+
+package helper
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+const panelUpdaterPath = "/usr/local/libexec/hyzorax-control-updater"
+
+func launchPanelUpdate(ctx context.Context) (map[string]any, *Error) {
+	info, err := os.Stat(panelUpdaterPath)
+	if err != nil {
+		return nil, &Error{Code: "updater_unavailable", Message: "panel updater is not installed"}
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
+		return nil, &Error{Code: "updater_untrusted", Message: "panel updater permissions are unsafe"}
+	}
+	unit := fmt.Sprintf("hyzorax-control-update-%s", time.Now().UTC().Format("20060102T150405"))
+	command := exec.CommandContext(ctx, "/usr/bin/systemd-run",
+		"--quiet", "--no-block", "--collect",
+		"--unit="+unit,
+		"--property=Type=oneshot",
+		panelUpdaterPath,
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = "panel update job could not be started"
+		}
+		return nil, &Error{Code: "update_start_failed", Message: message}
+	}
+	return map[string]any{"status": "started", "unit": unit + ".service"}, nil
+}
+
+========== FILE: internal/helper/protocol.go ==========
+package helper
+
+import "encoding/json"
+
+const ProtocolVersion = 4
+
+type Request struct {
+	Version       int             `json:"version"`
+	ID            string          `json:"id"`
+	CorrelationID string          `json:"correlation_id"`
+	ActorID       string          `json:"actor_id"`
+	Action        string          `json:"action"`
+	Target        string          `json:"target,omitempty"`
+	Params        json.RawMessage `json:"params,omitempty"`
+}
+
+type Response struct {
+	Version int            `json:"version"`
+	ID      string         `json:"id"`
+	OK      bool           `json:"ok"`
+	Data    map[string]any `json:"data,omitempty"`
+	Error   *Error         `json:"error,omitempty"`
+}
+
+type Error struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
 
