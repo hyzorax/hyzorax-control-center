@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -82,7 +82,39 @@ jobs:
           ./build/hyzorax-control-helper -version | grep -q '1.5.0'
           (cd build && sha256sum -c SHA256SUMS)
 
-      - name: Guarded rename validation summary
+      - name: Record successful validation
+        if: success()
         run: |
-          echo 'V1.5.0 Guarded Rename validation passed.'
-          echo 'No public release was published by this workflow.'
+          set -Eeuo pipefail
+          mkdir -p release-status
+          {
+            echo 'status=success'
+            echo 'version=1.5.0'
+            echo 'feature=guarded-rename'
+            echo "validated_commit=${GITHUB_SHA}"
+            echo "validated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > release-status/v1.5.0-guarded-rename-validation.txt
+          rm -f release-status/v1.5.0-guarded-rename-validation-failed.txt
+          git config user.name 'HYZoraX Validation Bot'
+          git config user.email 'validation-bot@hyzorax.invalid'
+          git add release-status/v1.5.0-guarded-rename-validation.txt release-status/v1.5.0-guarded-rename-validation-failed.txt 2>/dev/null || true
+          git commit -m 'Record V1.5.0 guarded rename validation' || exit 0
+          git push
+
+      - name: Record failed validation
+        if: failure()
+        run: |
+          set +e
+          mkdir -p release-status
+          {
+            echo 'status=failed'
+            echo 'version=1.5.0'
+            echo 'feature=guarded-rename'
+            echo "validated_commit=${GITHUB_SHA}"
+            echo "failed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > release-status/v1.5.0-guarded-rename-validation-failed.txt
+          git config user.name 'HYZoraX Validation Bot'
+          git config user.email 'validation-bot@hyzorax.invalid'
+          git add release-status/v1.5.0-guarded-rename-validation-failed.txt
+          git commit -m 'Record failed V1.5.0 guarded rename validation' || exit 0
+          git push || true
