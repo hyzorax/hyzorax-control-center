@@ -7,6 +7,12 @@ on:
     paths:
       - '.github/workflows/validate-v150-guarded-rename.yml'
       - 'release-patch/v1.5.0/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/validate-v150-guarded-rename.yml'
+      - 'release-patch/v1.5.0/**'
   workflow_dispatch:
 
 permissions:
