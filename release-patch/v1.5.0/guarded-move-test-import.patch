@@ -1,0 +1,11 @@
+diff --git a/internal/helper/filesystem_linux_test.go b/internal/helper/filesystem_linux_test.go
+--- a/internal/helper/filesystem_linux_test.go
++++ b/internal/helper/filesystem_linux_test.go
+@@ -6,6 +6,7 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"strings"
++	"syscall"
+ 	"testing"
+ 
+ 	"golang.org/x/sys/unix"
