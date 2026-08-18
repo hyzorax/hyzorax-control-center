@@ -34,7 +34,7 @@ case "${machine}" in
   *) fail "Unsupported CPU architecture: ${machine}. This release supports Linux x86-64 only." ;;
 esac
 
-for command_name in curl sha256sum tar awk install mktemp pgrep; do
+for command_name in curl sha256sum tar awk install mktemp pgrep apt-get; do
   command -v "${command_name}" >/dev/null 2>&1 || fail "Required command is missing: ${command_name}"
 done
 
@@ -47,10 +47,34 @@ package_manager_busy() {
   return 1
 }
 
-wait_for_fresh_ubuntu() {
+wait_for_package_manager() {
+  local context="${1:-Ubuntu package manager}"
   local waited=0
   local timeout_seconds=900
   local announced=false
+
+  while package_manager_busy; do
+    if [[ "${announced}" == false ]]; then
+      echo "Waiting for ${context} to become ready..."
+      echo "HYZoraX will continue automatically; no action is required."
+      announced=true
+    fi
+
+    if (( waited >= timeout_seconds )); then
+      fail "${context} did not become ready within ${timeout_seconds} seconds."
+    fi
+
+    sleep 5
+    waited=$((waited + 5))
+  done
+
+  if [[ "${announced}" == true ]]; then
+    echo "Ubuntu package manager: ready"
+  fi
+}
+
+wait_for_fresh_ubuntu() {
+  local timeout_seconds=900
   local cloud_state=""
 
   echo "Checking Ubuntu initialization..."
@@ -67,34 +91,49 @@ wait_for_fresh_ubuntu() {
     fi
   fi
 
-  while package_manager_busy; do
-    if [[ "${announced}" == false ]]; then
-      echo "Waiting for Ubuntu package initialization to finish..."
-      echo "HYZoraX will continue automatically; no action is required."
-      announced=true
-    fi
-
-    if (( waited >= timeout_seconds )); then
-      fail "Ubuntu package initialization did not finish within ${timeout_seconds} seconds."
-    fi
-
-    sleep 5
-    waited=$((waited + 5))
-  done
-
-  if [[ "${announced}" == true ]]; then
-    echo "Ubuntu package manager: ready"
-  else
-    echo "Ubuntu initialization: ready"
-  fi
+  wait_for_package_manager "Ubuntu package initialization"
+  echo "Ubuntu initialization: ready"
 
   # Fresh-image package transactions can trigger a systemd daemon reexec right
-  # as apt exits. Let that control-plane activity settle before bootstrap starts
-  # its persistent installer worker.
+  # as apt exits. Let that control-plane activity settle before our own update.
   sleep 3
 }
 
+update_ubuntu_system() {
+  echo
+  echo "Checking Ubuntu updates..."
+
+  wait_for_package_manager "Ubuntu package manager"
+
+  echo "Running apt-get update..."
+  DEBIAN_FRONTEND=noninteractive \
+    apt-get \
+      -o Acquire::Retries=3 \
+      update
+
+  echo "Running apt-get upgrade..."
+  DEBIAN_FRONTEND=noninteractive \
+  NEEDRESTART_MODE=l \
+    apt-get \
+      -y \
+      -o Acquire::Retries=3 \
+      -o Dpkg::Options::=--force-confold \
+      upgrade
+
+  # An upgrade may briefly trigger package hooks or a systemd daemon reexec.
+  # Do not start HYZoraX until those package transactions have completely left.
+  wait_for_package_manager "Ubuntu update finalization"
+  sleep 5
+
+  if [[ -f /run/reboot-required ]]; then
+    echo "Ubuntu updates: complete (system reboot recommended later)"
+  else
+    echo "Ubuntu updates: complete"
+  fi
+}
+
 wait_for_fresh_ubuntu
+update_ubuntu_system
 
 workdir="$(mktemp -d /root/.hyzorax-public-installer.XXXXXX)"
 cleanup() {
@@ -122,6 +161,7 @@ curl_secure() {
     "$@"
 }
 
+echo
 echo "${PRODUCT} installer"
 echo "Downloading latest verified release..."
 curl_secure --output "${checksum_path}" "${RELEASE_BASE}/${CHECKSUM_NAME}"
