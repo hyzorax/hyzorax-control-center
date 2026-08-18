@@ -16,6 +16,8 @@ for old, new in (
     ('<p class="eyebrow">Rename</p><h3>Rename item</h3>', '<p class="eyebrow">Guarded rename</p><h3>Rename item</h3>'),
     ('<p class="eyebrow">Copy</p><h3>Copy item</h3>', '<p class="eyebrow">Guarded copy</p><h3>Copy item</h3>'),
     ('<p class="eyebrow">Move</p><h3>Move item</h3>', '<p class="eyebrow">Guarded move</p><h3>Move item</h3>'),
+    ('Same directory · existing paths are never overwritten.', 'Same directory · Existing paths are never overwritten.'),
+    ('Atomic same-filesystem move · existing paths are never overwritten.', 'Atomic same-filesystem move · no overwrite · Cross-filesystem moves are blocked.'),
 ):
     if old not in html:
         raise SystemExit(f"missing UI marker: {old}")
@@ -43,4 +45,4 @@ for test_path in (app_test, assets_test):
     text = text.replace("Version 1.5.0", "Version 1.5.1")
     test_path.write_text(text, encoding="utf-8")
 
-print("Finalized V1.5.1 UI labels, legacy action semantics, and version regression tests")
+print("Finalized V1.5.1 UI labels, security hints, legacy action semantics, and version regression tests")
