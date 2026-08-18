@@ -96,3 +96,18 @@ jobs:
             --title 'HYZoraX Control Center V1.4.2' \
             --notes 'Final manual-update bridge release: 1-second live dashboard, panel self-update, mixed 8-character security entrance, one-shot hz menu, immediate trusted IP TLS bootstrap, Owner detail display, and HYZORAX TLS banner.' \
             --latest
+
+      - name: Record successful release
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release-status
+          {
+            echo 'version=1.4.2'
+            echo "archive_sha256=$(sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz | awk '{print $1}')"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > release-status/v1.4.2.txt
+          git config user.name 'HYZoraX Release Bot'
+          git config user.email 'release-bot@hyzorax.invalid'
+          git add release-status/v1.4.2.txt
+          git commit -m 'Record successful V1.4.2 release'
+          git push origin HEAD:main
