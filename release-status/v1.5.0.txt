@@ -1,0 +1,10 @@
+status=success
+version=1.5.0
+features=guarded-rename,guarded-copy,guarded-move
+helper_protocol=7
+cross_filesystem_move=denied-by-design
+release_run_id=32190721500
+release_job_id=95884215633
+release_tag=v1.5.0
+checksum_asset=HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+built_at=2026-08-18T22:02:50Z
