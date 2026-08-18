@@ -1,0 +1,4 @@
+status=success
+version=1.4.3
+archive_sha256=7a633929493e982817b17a6dcbb3785b2a99f27c7a3eefd62252bf63ffb58d59
+built_at=2026-08-18T19:22:17Z
