@@ -3,6 +3,7 @@ name: Validate V1.5.0 guarded rename
 on:
   push:
     branches:
+      - main
       - agent/v1.5.0-guarded-rename
     paths:
       - '.github/workflows/validate-v150-guarded-rename.yml'
