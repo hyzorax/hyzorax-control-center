@@ -28,8 +28,9 @@ jobs:
           curl -fL --retry 3 https://github.com/hyzorax/hyzorax-control-center/releases/download/v1.4.2/HYZoraX_Control_Center_Linux_x86_64.tar.gz -o /tmp/base.tar.gz >> /tmp/diag.log 2>&1
           rc=$?
           if [ "$rc" -eq 0 ]; then tar -xzf /tmp/base.tar.gz -C work >> /tmp/diag.log 2>&1; rc=$?; fi
-          if [ "$rc" -eq 0 ]; then python3 -m py_compile release-patch/v1.4.3/apply.py >> /tmp/diag.log 2>&1; rc=$?; fi
+          if [ "$rc" -eq 0 ]; then python3 -m py_compile release-patch/v1.4.3/apply.py release-patch/v1.4.3/fix-tests.py >> /tmp/diag.log 2>&1; rc=$?; fi
           if [ "$rc" -eq 0 ]; then python3 release-patch/v1.4.3/apply.py work/hyzorax-control >> /tmp/diag.log 2>&1; rc=$?; fi
+          if [ "$rc" -eq 0 ]; then python3 release-patch/v1.4.3/fix-tests.py work/hyzorax-control >> /tmp/diag.log 2>&1; rc=$?; fi
           if [ "$rc" -eq 0 ]; then bash -n work/hyzorax-control/packaging/bootstrap.sh >> /tmp/diag.log 2>&1; rc=$?; fi
           if [ "$rc" -eq 0 ]; then bash -n work/hyzorax-control/packaging/hyzorax-control-tls >> /tmp/diag.log 2>&1; rc=$?; fi
           if [ "$rc" -eq 0 ]; then bash -n work/hyzorax-control/packaging/hz >> /tmp/diag.log 2>&1; rc=$?; fi
@@ -46,5 +47,5 @@ jobs:
           git config user.name hyzorax
           git config user.email hyzorax@gmail.com
           git add release-status/v1.4.3-diagnostic.txt
-          git commit -m 'Record extended V1.4.3 diagnostic' || exit 0
+          git commit -m 'Record V1.4.3 diagnostic with updated tests' || exit 0
           git push
