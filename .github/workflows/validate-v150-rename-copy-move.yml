@@ -25,6 +25,7 @@ jobs:
       - name: Download V1.4.4 source release
         run: |
           set -Eeuo pipefail
+          echo download-base > /tmp/hyzorax-validation-stage
           mkdir -p work
           curl -fL --retry 3 \
             https://github.com/hyzorax/hyzorax-control-center/releases/download/v1.4.4/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
@@ -35,6 +36,7 @@ jobs:
       - name: Reassemble V1.5.0 patches
         run: |
           set -Eeuo pipefail
+          echo reassemble-patches > /tmp/hyzorax-validation-stage
           for feature in rename copy move; do
             base64 -d "release-patch/v1.5.0/guarded-${feature}.patch.gz.b64" > "/tmp/${feature}.patch.gz"
             gzip -dc "/tmp/${feature}.patch.gz" > "/tmp/${feature}.patch"
@@ -49,49 +51,65 @@ jobs:
       - name: Apply V1.5.0 guarded patches
         run: |
           set -Eeuo pipefail
-          patch --batch -p1 -d work/hyzorax-control < /tmp/rename.patch
-          patch --batch -p1 -d work/hyzorax-control < /tmp/copy.patch
-          patch --batch -p1 -d work/hyzorax-control < /tmp/move.patch
+          echo apply-patches > /tmp/hyzorax-validation-stage
+          {
+            patch --batch -p1 -d work/hyzorax-control < /tmp/rename.patch
+            patch --batch -p1 -d work/hyzorax-control < /tmp/copy.patch
+            patch --batch -p1 -d work/hyzorax-control < /tmp/move.patch
+          } 2>&1 | tee /tmp/patch.log
 
       - name: Static syntax and feature checks
         run: |
           set -Eeuo pipefail
+          echo static-checks > /tmp/hyzorax-validation-stage
           cd work/hyzorax-control
-          gofmt -w internal/helper/filesystem_linux.go internal/helper/filesystem_linux_test.go internal/helper/protocol.go internal/helper/server_linux.go internal/httpapi/app.go internal/httpapi/app_test.go internal/httpapi/files_test.go internal/httpapi/handlers.go internal/web/assets_test.go
-          node --check internal/web/static/app.js
-          bash -n packaging/bootstrap.sh
-          bash -n packaging/hyzorax-control-tls
-          bash -n packaging/hyzorax-control-updater
-          bash -n packaging/hz
-          grep -q 'const ProtocolVersion = 7' internal/helper/protocol.go
-          grep -q 'filesystem.rename' internal/helper/server_linux.go
-          grep -q 'filesystem.copy' internal/helper/server_linux.go
-          grep -q 'filesystem.move' internal/helper/server_linux.go
-          grep -q 'RENAME_NOREPLACE' internal/helper/filesystem_linux.go
-          grep -q 'maxCopyBytes' internal/helper/filesystem_linux.go
-          grep -q 'cross_filesystem_move_denied' internal/helper/filesystem_linux.go
-          grep -q 'api/v1/files/rename' internal/web/static/app.js
-          grep -q 'api/v1/files/copy' internal/web/static/app.js
-          grep -q 'api/v1/files/move' internal/web/static/app.js
-          grep -q 'move-dialog' internal/web/static/index.html
-          grep -q 'Version 1.5.0' internal/web/static/index.html
+          {
+            gofmt -w internal/helper/filesystem_linux.go internal/helper/filesystem_linux_test.go internal/helper/protocol.go internal/helper/server_linux.go internal/httpapi/app.go internal/httpapi/app_test.go internal/httpapi/files_test.go internal/httpapi/handlers.go internal/web/assets_test.go
+            node --check internal/web/static/app.js
+            bash -n packaging/bootstrap.sh
+            bash -n packaging/hyzorax-control-tls
+            bash -n packaging/hyzorax-control-updater
+            bash -n packaging/hz
+            grep -q 'const ProtocolVersion = 7' internal/helper/protocol.go
+            grep -q 'filesystem.rename' internal/helper/server_linux.go
+            grep -q 'filesystem.copy' internal/helper/server_linux.go
+            grep -q 'filesystem.move' internal/helper/server_linux.go
+            grep -q 'RENAME_NOREPLACE' internal/helper/filesystem_linux.go
+            grep -q 'maxCopyBytes' internal/helper/filesystem_linux.go
+            grep -q 'cross_filesystem_move_denied' internal/helper/filesystem_linux.go
+            grep -q 'api/v1/files/rename' internal/web/static/app.js
+            grep -q 'api/v1/files/copy' internal/web/static/app.js
+            grep -q 'api/v1/files/move' internal/web/static/app.js
+            grep -q 'move-dialog' internal/web/static/index.html
+            grep -q 'Version 1.5.0' internal/web/static/index.html
+          } 2>&1 | tee /tmp/static.log
 
-      - name: Test and vet
+      - name: Test
         run: |
           set -Eeuo pipefail
+          echo go-test > /tmp/hyzorax-validation-stage
           cd work/hyzorax-control
-          go test ./...
-          go vet ./...
+          go test ./... 2>&1 | tee /tmp/go-test.log
+
+      - name: Vet
+        run: |
+          set -Eeuo pipefail
+          echo go-vet > /tmp/hyzorax-validation-stage
+          cd work/hyzorax-control
+          go vet ./... 2>&1 | tee /tmp/go-vet.log
 
       - name: Build validation package
         run: |
           set -Eeuo pipefail
+          echo build > /tmp/hyzorax-validation-stage
           cd work/hyzorax-control
-          make clean
-          make release VERSION=1.5.0
-          ./build/hyzorax-control -version | grep -q '1.5.0'
-          ./build/hyzorax-control-helper -version | grep -q '1.5.0'
-          (cd build && sha256sum -c SHA256SUMS)
+          {
+            make clean
+            make release VERSION=1.5.0
+            ./build/hyzorax-control -version | grep -q '1.5.0'
+            ./build/hyzorax-control-helper -version | grep -q '1.5.0'
+            (cd build && sha256sum -c SHA256SUMS)
+          } 2>&1 | tee /tmp/build.log
 
       - name: Record successful validation
         if: success()
@@ -114,21 +132,30 @@ jobs:
           git commit -m 'Record V1.5.0 rename copy move validation' || exit 0
           git push
 
-      - name: Record failed validation
+      - name: Record failed validation with diagnostics
         if: failure()
         run: |
           set +e
           mkdir -p release-status
+          status_file=release-status/v1.5.0-rename-copy-move-validation-failed.txt
           {
             echo 'status=failed'
             echo 'version=1.5.0'
             echo 'features=guarded-rename,guarded-copy,guarded-move'
             echo 'helper_protocol=7'
+            printf 'failure_stage='; cat /tmp/hyzorax-validation-stage 2>/dev/null || echo unknown
             echo "validated_commit=${GITHUB_SHA}"
             echo "failed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } > release-status/v1.5.0-rename-copy-move-validation-failed.txt
+            for log in /tmp/patch.log /tmp/static.log /tmp/go-test.log /tmp/go-vet.log /tmp/build.log; do
+              if [[ -s "$log" ]]; then
+                echo
+                echo "===== $(basename "$log") ====="
+                tail -n 120 "$log"
+              fi
+            done
+          } > "$status_file"
           git config user.name 'HYZoraX Validation Bot'
           git config user.email 'validation-bot@hyzorax.invalid'
-          git add release-status/v1.5.0-rename-copy-move-validation-failed.txt
-          git commit -m 'Record failed V1.5.0 rename copy move validation' || exit 0
+          git add "$status_file"
+          git commit -m 'Record diagnostic V1.5.0 validation failure' || exit 0
           git push || true
