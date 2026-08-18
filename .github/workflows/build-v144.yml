@@ -7,12 +7,16 @@ on:
       - '.github/workflows/build-v144.yml'
       - 'release-patch/v1.4.4/**'
   workflow_dispatch:
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   build-release:
+    if: github.event_name != 'issues' || github.event.issue.title == 'HYZoraX V1.4.4 Build Trigger'
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
