@@ -1,0 +1,7 @@
+status=success
+version=1.5.0
+features=guarded-rename,guarded-copy,guarded-move
+helper_protocol=7
+cross_filesystem_move=denied-by-design
+validated_commit=6ed9a545d04218f99a968186600f31d01ac17965
+validated_at=2026-08-18T21:32:50Z
