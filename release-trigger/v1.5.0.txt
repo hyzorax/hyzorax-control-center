@@ -1,0 +1,4 @@
+version=1.5.0
+validated=true
+features=guarded-rename,guarded-copy,guarded-move
+triggered_at=2026-08-18T21:55:00Z
