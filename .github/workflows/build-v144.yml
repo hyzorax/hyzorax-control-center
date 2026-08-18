@@ -1,17 +1,17 @@
-name: HYZoraX registered release builder
+name: HYZoraX V1.5.0 registered release builder
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'release-trigger/v1.5.0.txt'
   workflow_dispatch:
-  issues:
-    types: [opened]
 
 permissions:
   contents: write
-  issues: write
 
 jobs:
   build-v150:
-    if: github.event_name != 'issues' || github.event.issue.title == 'HYZoraX V1.4.4 Build Trigger'
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
