@@ -34,9 +34,67 @@ case "${machine}" in
   *) fail "Unsupported CPU architecture: ${machine}. This release supports Linux x86-64 only." ;;
 esac
 
-for command_name in curl sha256sum tar awk install mktemp; do
+for command_name in curl sha256sum tar awk install mktemp pgrep; do
   command -v "${command_name}" >/dev/null 2>&1 || fail "Required command is missing: ${command_name}"
 done
+
+package_manager_busy() {
+  pgrep -x apt-get >/dev/null 2>&1 && return 0
+  pgrep -x apt >/dev/null 2>&1 && return 0
+  pgrep -x dpkg >/dev/null 2>&1 && return 0
+  pgrep -x dpkg-deb >/dev/null 2>&1 && return 0
+  pgrep -f '/usr/bin/unattended-upgrade' >/dev/null 2>&1 && return 0
+  return 1
+}
+
+wait_for_fresh_ubuntu() {
+  local waited=0
+  local timeout_seconds=900
+  local announced=false
+  local cloud_state=""
+
+  echo "Checking Ubuntu initialization..."
+
+  if command -v cloud-init >/dev/null 2>&1; then
+    cloud_state="$(cloud-init status 2>/dev/null || true)"
+    if grep -qi 'status:[[:space:]]*running' <<<"${cloud_state}"; then
+      echo "Waiting for cloud initialization to finish..."
+      if command -v timeout >/dev/null 2>&1; then
+        timeout "${timeout_seconds}" cloud-init status --wait >/dev/null 2>&1 || true
+      else
+        cloud-init status --wait >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+
+  while package_manager_busy; do
+    if [[ "${announced}" == false ]]; then
+      echo "Waiting for Ubuntu package initialization to finish..."
+      echo "HYZoraX will continue automatically; no action is required."
+      announced=true
+    fi
+
+    if (( waited >= timeout_seconds )); then
+      fail "Ubuntu package initialization did not finish within ${timeout_seconds} seconds."
+    fi
+
+    sleep 5
+    waited=$((waited + 5))
+  done
+
+  if [[ "${announced}" == true ]]; then
+    echo "Ubuntu package manager: ready"
+  else
+    echo "Ubuntu initialization: ready"
+  fi
+
+  # Fresh-image package transactions can trigger a systemd daemon reexec right
+  # as apt exits. Let that control-plane activity settle before bootstrap starts
+  # its persistent installer worker.
+  sleep 3
+}
+
+wait_for_fresh_ubuntu
 
 workdir="$(mktemp -d /root/.hyzorax-public-installer.XXXXXX)"
 cleanup() {
