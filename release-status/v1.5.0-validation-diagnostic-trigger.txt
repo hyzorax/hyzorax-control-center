@@ -1,0 +1,2 @@
+triggered_at=2026-08-18T21:25:00Z
+purpose=diagnostic validation rerun
