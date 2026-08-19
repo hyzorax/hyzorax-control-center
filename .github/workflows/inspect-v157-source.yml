@@ -23,25 +23,30 @@ jobs:
           gh release download v1.5.6 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
           tar -xzf /tmp/base.tar.gz -C work
           test -d work/hyzorax-control
-      - name: Inspect source paths
+      - name: Inspect focused source
         run: |
           set -Eeuo pipefail
           cd work/hyzorax-control
-          echo '===== SOURCE FILES ====='
-          find internal packaging cmd -maxdepth 3 -type f | sort
-          echo '===== AUTH/SETUP/SESSION HITS ====='
-          grep -RniE 'pending.?setup|password|login|session|remember|username|credential|entrance|first.?run' internal packaging cmd | head -n 700 || true
-          echo '===== BOOTSTRAP RELEVANT ====='
-          grep -nE 'Username:|Password:|final_username|final_password|pending|credential|bootstrap|install_completed|entrance|panel_url|Panel URL|MOTD|motd|update-motd' packaging/bootstrap.sh | head -n 300 || true
-          echo '===== STORE FILES ====='
-          find internal/store -maxdepth 2 -type f -print -exec sh -c 'echo --- $1; sed -n "1,320p" "$1"' _ {} \;
-          echo '===== HTTP APP ====='
-          sed -n '1,520p' internal/httpapi/app.go
-          echo '===== HTTP APP CONT ====='
-          sed -n '521,1100p' internal/httpapi/app.go
-          echo '===== STATIC INDEX EDITOR/LOGIN ====='
-          grep -nE 'login|password|remember|editor-dialog|editor-find|file-manager|Version 1.5.6' internal/web/static/index.html | head -n 300 || true
-          echo '===== JS AUTH/EDITOR/FILEROUTES ====='
-          grep -nE 'login|password|remember|session|openEditor|editorFind|loadFiles|file-list|files/list|editor-dialog|Ctrl|keydown' internal/web/static/app.js | head -n 800 || true
-          echo '===== HZ ====='
-          sed -n '1,420p' packaging/hz
+          for spec in \
+            'internal/httpapi/handlers.go:1:210' \
+            'internal/httpapi/middleware.go:100:240' \
+            'internal/httpapi/app_test.go:1:170' \
+            'cmd/hyzorax-control/main.go:1:220' \
+            'cmd/hyzorax-control/main_test.go:1:90' \
+            'internal/web/static/index.html:1:85' \
+            'internal/web/static/index.html:245:315' \
+            'internal/web/static/app.js:1:185' \
+            'internal/web/static/app.js:235:360' \
+            'internal/web/static/app.js:535:640' \
+            'internal/web/static/app.js:915:970' \
+            'internal/web/static/app.css:250:340' \
+            'internal/web/static/app.css:780:910' \
+            'packaging/bootstrap.sh:170:225' \
+            'packaging/bootstrap.sh:360:420' \
+            'packaging/bootstrap.sh:495:535' \
+            'internal/config/config.go:1:145' \
+            'internal/systeminfo/summary_linux.go:1:320'; do
+            file="${spec%%:*}"; rest="${spec#*:}"; start="${rest%%:*}"; end="${rest##*:}"
+            echo "===== ${file}:${start}-${end} ====="
+            sed -n "${start},${end}p" "${file}"
+          done
