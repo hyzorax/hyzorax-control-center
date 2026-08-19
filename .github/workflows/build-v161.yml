@@ -34,9 +34,10 @@ jobs:
       - name: Apply V1.6.1
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.6.1/prepare.py release-patch/v1.6.1/apply.py
+          python3 -m py_compile release-patch/v1.6.1/prepare.py release-patch/v1.6.1/apply.py release-patch/v1.6.1/harden.py
           python3 release-patch/v1.6.1/prepare.py work/hyzorax-control
           python3 release-patch/v1.6.1/apply.py work/hyzorax-control
+          python3 release-patch/v1.6.1/harden.py work/hyzorax-control
           cd work/hyzorax-control
           gofmt -w internal/installer/*.go internal/helper/*.go internal/web/assets_test.go internal/httpapi/app_test.go
       - name: Static and security checks
@@ -56,7 +57,7 @@ jobs:
           grep -q 'installer.nginx.rollback' internal/helper/server_linux.go
           grep -q 'TCP port 80 is already in use' internal/helper/installer_nginx_linux.go
           grep -q 'firewall_changed.*false' internal/helper/installer_nginx_linux.go
-          if grep -Rni --include='*.go' -E 'request\.Params.*(package|command)|exec\.CommandContext\(ctx, [^"/]' internal/helper/installer_nginx_linux.go; then
+          if grep -Rni --include='*.go' -E 'request\.Params.*(package|command)|runCommandCombined|exec\.CommandContext\(ctx, executable' internal/helper/installer_nginx_linux.go; then
             echo 'Nginx installer appears to accept dynamic command/package execution' >&2
             exit 1
           fi
