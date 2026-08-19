@@ -1,0 +1,17 @@
+status=success
+version=1.5.3
+scope=file-manager-usability-recovery
+features=click-to-open,text-editor-on-click,image-preview,recycle-bin,restore,permanent-purge,persistent-upload-dialog,drag-drop-upload
+helper_protocol=9
+image_preview=png,jpg,jpeg,webp,gif
+browser_delete=move-to-recycle-bin
+recycle_restore=enabled
+recycle_permanent_purge=explicit
+upload_dialog=aaPanel-style
+upload_auto_close=false
+config_backup_validation=deferred-to-settings
+release_run_id=32201919522
+release_job_id=95917339087
+release_tag=v1.5.3
+checksum_asset=HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+patch_merge_commit=06cc0d8a7c43435d6265618b24dde2c10dbe5d60
