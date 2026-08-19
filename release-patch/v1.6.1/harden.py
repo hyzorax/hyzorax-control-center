@@ -21,4 +21,15 @@ if count != 1:
 if 'runCommandCombined' in text or 'exec.CommandContext(ctx, executable' in text:
     raise SystemExit("generic executable wrapper remains")
 path.write_text(text, encoding="utf-8")
+
+policy_path = root / "internal/helper/policy_test.go"
+policy = policy_path.read_text(encoding="utf-8")
+if "context.Background()" in policy and '"context"' not in policy:
+    if 'import "testing"' in policy:
+        policy = policy.replace('import "testing"', 'import (\n    "context"\n    "testing"\n)', 1)
+    elif 'import (\n' in policy:
+        policy = policy.replace('import (\n', 'import (\n    "context"\n', 1)
+    else:
+        raise SystemExit("could not add context import to helper policy test")
+    policy_path.write_text(policy, encoding="utf-8")
 print("Hardened Nginx privileged installer to fixed executable paths")
