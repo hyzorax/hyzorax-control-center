@@ -57,7 +57,7 @@ jobs:
           grep -q 'openEditorFind' internal/web/static/app.js
           grep -q 'toggleEditorMaximize' internal/web/static/app.js
           grep -q 'selectEditorFindMatch' internal/web/static/app.js
-          grep -q 'event.key.toLowerCase() === "f"' internal/web/static/app.js
+          grep -q 'event.key.toLowerCase()==="f"' internal/web/static/app.js
           grep -q '.editor-maximized' internal/web/static/app.css
           grep -q '.editor-find-bar' internal/web/static/app.css
           if grep -q 'window.confirm(' internal/web/static/app.js; then
