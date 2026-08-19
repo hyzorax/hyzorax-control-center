@@ -5,6 +5,8 @@ import sys
 if len(sys.argv) != 2:
     raise SystemExit("usage: fix.py <hyzorax-control-source-root>")
 root = Path(sys.argv[1]).resolve()
+
+# Normalize editor save-handler boundary after the V1.5.6 source transform.
 path = root / "internal/web/static/app.js"
 text = path.read_text(encoding="utf-8")
 form_marker = '$("#editor-form").addEventListener("submit",async(event)=>'
@@ -20,9 +22,23 @@ start += len(end_marker)
 end = text.find(delete_marker, start)
 if end < 0:
     raise SystemExit("delete-handler boundary not found")
-# V1.5.6 placed no required behavior between the text-editor submit handler
-# and the delete submit handler. Restrict cleanup to the editor handler so
-# unrelated form handlers and editor workspace functions remain untouched.
 text = text[:start] + "\n" + text[end:]
 path.write_text(text, encoding="utf-8")
-print("Normalized V1.5.7 editor save-handler boundary")
+
+# Fresh initialization no longer exposes or consumes a generated password.
+main_path = root / "cmd/hyzorax-control/main.go"
+main = main_path.read_text(encoding="utf-8")
+old = 'created, username, password, err := initializeOwner(*configPath)'
+new = 'created, username, _, err := initializeOwner(*configPath)'
+if old not in main:
+    raise SystemExit("Owner initializer variable marker not found")
+main_path.write_text(main.replace(old, new, 1), encoding="utf-8")
+
+# Keep embedded-interface regression test aligned with the shipped release.
+assets_path = root / "internal/web/assets_test.go"
+assets = assets_path.read_text(encoding="utf-8")
+if '1.5.0' not in assets:
+    raise SystemExit("embedded asset release-version marker not found")
+assets_path.write_text(assets.replace('1.5.0', '1.5.7'), encoding="utf-8")
+
+print("Normalized V1.5.7 editor boundary, CLI initializer and asset version test")
