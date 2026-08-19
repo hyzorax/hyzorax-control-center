@@ -14,5 +14,11 @@ if needle not in text:
     if old not in text:
         raise SystemExit("filesystem list marker not found")
     text = text.replace(old, new, 1)
+# The main patch guard historically checked the older entry variable name.
+# Keep a harmless comment marker so it recognizes that the staging filter
+# has already been applied with the actual directoryEntry variable.
+legacy_guard = '// strings.HasPrefix(entry.Name(), ".hyzorax-trash-")'
+if legacy_guard not in text:
+    text = text.replace('func filesystemList(ctx context.Context, rawPath string) (map[string]any, *Error) {', legacy_guard + '\nfunc filesystemList(ctx context.Context, rawPath string) (map[string]any, *Error) {', 1)
 path.write_text(text, encoding="utf-8")
 print("Prepared V1.5.3 recycle staging filter")
