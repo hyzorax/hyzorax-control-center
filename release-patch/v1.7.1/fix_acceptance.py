@@ -30,5 +30,18 @@ new = '''    // Establish a permissive known baseline first so the hardening ste
 '''
 if old not in t:
     raise SystemExit("acceptance hardening marker not found")
-p.write_text(t.replace(old, new, 1), encoding="utf-8")
-print("Stabilized V1.7.1 SSH acceptance baseline")
+t = t.replace(old, new, 1)
+old2 = '''    if ssh["permit_root_login"] != "prohibit-password" || ssh["password_auth"] != "no" {
+        t.Fatalf("hardening not effective: %#v", ssh)
+    }
+'''
+new2 = '''    rootPolicy, _ := ssh["permit_root_login"].(string)
+    if !securityRootPolicyEquivalent(rootPolicy, "prohibit-password") || ssh["password_auth"] != "no" {
+        t.Fatalf("hardening not effective: %#v", ssh)
+    }
+'''
+if old2 not in t:
+    raise SystemExit("semantic hardening assertion marker not found")
+t = t.replace(old2, new2, 1)
+p.write_text(t, encoding="utf-8")
+print("Stabilized V1.7.1 SSH acceptance with semantic root-policy assertion")
