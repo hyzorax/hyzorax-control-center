@@ -1,0 +1,104 @@
+name: Build and release V1.5.6 Editor UX
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build-v156:
+    if: github.event.pull_request.head.ref == 'agent/v1.5.6-editor-search-maximize'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+
+      - name: Download V1.5.5 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.5.5 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+
+      - name: Apply V1.5.6
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.5.6/apply.py release-patch/v1.5.6/testfix.py
+          python3 release-patch/v1.5.6/apply.py work/hyzorax-control
+          python3 release-patch/v1.5.6/testfix.py work/hyzorax-control
+          cd work/hyzorax-control
+          gofmt -w internal/web/assets_test.go internal/httpapi/app_test.go
+
+      - name: Static editor checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hyzorax-control-tls
+          bash -n packaging/hyzorax-control-updater
+          bash -n packaging/hz
+          grep -q 'Version 1.5.6' internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 10' internal/helper/protocol.go
+          grep -q 'id="editor-maximize-button"' internal/web/static/index.html
+          grep -q 'id="editor-find-bar"' internal/web/static/index.html
+          grep -q 'id="editor-find-input"' internal/web/static/index.html
+          grep -q 'openEditorFind' internal/web/static/app.js
+          grep -q 'toggleEditorMaximize' internal/web/static/app.js
+          grep -q 'selectEditorFindMatch' internal/web/static/app.js
+          grep -q 'event.key.toLowerCase()==="f"' internal/web/static/app.js
+          grep -q '.editor-maximized' internal/web/static/app.css
+          grep -q '.editor-find-bar' internal/web/static/app.css
+          if grep -q 'window.confirm(' internal/web/static/app.js; then
+            echo 'Native browser confirm regressed' >&2
+            exit 1
+          fi
+
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+
+      - name: Build and verify V1.5.6
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.5.6
+          ./build/hyzorax-control -version | grep -q '1.5.6'
+          ./build/hyzorax-control-helper -version | grep -q '1.5.6'
+          (cd build && sha256sum -c SHA256SUMS)
+
+      - name: Package release assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+
+      - name: Publish V1.5.6 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.5.6 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.5.6 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.5.6' \
+            --notes 'Editor UX release. Adds panel-native Maximize/Restore within the browser viewport, Ctrl/Cmd+F Find bar with match count and next/previous navigation, F3/Shift+F3 navigation, line/column status, and a more practical aaPanel-inspired editor layout while keeping the HYZoraX theme. Existing guarded save behavior, line numbers, UTF-8, Ctrl/Cmd+S, File Manager permissions/ownership, Recycle Bin and panel-native confirmations remain intact. Helper protocol remains V10.' \
+            --latest
