@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
 if len(sys.argv)!=2: raise SystemExit('usage: diagnose.py <source-root>')
-path=Path(sys.argv[1]).resolve()/ 'internal/helper/installer_php84_acceptance_test.go'
+source_root=Path(sys.argv[1]).resolve()
+secure_script=Path(__file__).with_name('secure_repo.py')
+subprocess.run([sys.executable,str(secure_script),str(source_root)],check=True)
+path=source_root/'internal/helper/installer_php84_acceptance_test.go'
 text=path.read_text(encoding='utf-8')
 old='''\tinstall := call("installer.php84.install")\n\tif !install.OK || install.Error != nil {\n\t\tt.Fatalf("install failed: %+v", install)\n\t}'''
 if old not in text:
