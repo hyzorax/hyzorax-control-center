@@ -1,0 +1,157 @@
+name: Build and release V1.6.3 PostgreSQL 18 Installer
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build-v163:
+    if: github.event.pull_request.head.ref == 'agent/v1.6.3-postgresql18-installer'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Download V1.6.2 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.6.2 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+          sha256sum work/hyzorax-control/packaging/hz | awk '{print $1}' > /tmp/hz-before.sha
+          grep -q 'const ProtocolVersion = 12' work/hyzorax-control/internal/helper/protocol.go
+      - name: Apply V1.6.3
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.6.3/apply.py release-patch/v1.6.3/harden.py
+          python3 release-patch/v1.6.3/apply.py work/hyzorax-control
+          python3 release-patch/v1.6.3/harden.py work/hyzorax-control
+          cd work/hyzorax-control
+          gofmt -w internal/installer/*.go internal/helper/*.go internal/web/assets_test.go internal/httpapi/app_test.go
+      - name: Static and security checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hz
+          test "$(sha256sum packaging/hz | awk '{print $1}')" = "$(cat /tmp/hz-before.sha)"
+          grep -q 'Version 1.6.3' internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 13' internal/helper/protocol.go
+          grep -q 'func PostgreSQL18Manifest' internal/installer/builtin.go
+          grep -q 'https://apt.postgresql.org/pub/repos/apt noble-pgdg main' internal/installer/builtin.go
+          grep -q 'B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8' internal/installer/builtin.go
+          grep -q 'B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8' internal/helper/installer_postgresql18_linux.go
+          grep -q 'https://www.postgresql.org/media/keys/ACCC4CF8.asc' internal/helper/installer_postgresql18_linux.go
+          grep -q 'installer.postgresql18.preflight' internal/helper/server_linux.go
+          grep -q 'installer.postgresql18.install' internal/helper/server_linux.go
+          grep -q 'installer.postgresql18.health' internal/helper/server_linux.go
+          grep -q 'installer.postgresql18.rollback' internal/helper/server_linux.go
+          grep -q 'rollback_not_owned' internal/helper/installer_postgresql18_linux.go
+          grep -q 'scram-sha-256' internal/helper/installer_postgresql18_linux.go
+          if grep -Rni --include='*.go' -E 'request\.Params.*(package|repository|command|sql)|exec\.CommandContext\(ctx, executable|/bin/sh|bash -c' internal/helper/installer_postgresql18_linux.go; then
+            echo 'PostgreSQL 18 installer appears to accept dynamic privileged execution' >&2
+            exit 1
+          fi
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+      - name: Real Ubuntu 24.04 PostgreSQL 18 acceptance
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          existing=false
+          if command -v pg_lsclusters >/dev/null 2>&1 && pg_lsclusters --no-header 2>/dev/null | grep -q .; then existing=true; fi
+          if [[ -x /usr/lib/postgresql/18/bin/postgres || -e /etc/postgresql/18 || -e /var/lib/postgresql/18 ]]; then existing=true; fi
+          if grep -Rqs 'apt.postgresql.org/pub/repos/apt' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then existing=true; fi
+          if [[ "${existing}" == true ]]; then
+            echo 'Runner has existing PostgreSQL state; first verify HYZoraX refuses to overwrite/adopt it.'
+            sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestPostgreSQL18InstallerRejectsExistingState$' -count=1 -v
+            if command -v pg_lsclusters >/dev/null 2>&1; then
+              while read -r version cluster _; do
+                [[ -n "${version:-}" && -n "${cluster:-}" ]] || continue
+                sudo pg_dropcluster --stop "${version}" "${cluster}"
+              done < <(pg_lsclusters --no-header 2>/dev/null || true)
+            fi
+            mapfile -t pg18_packages < <(dpkg-query -W -f='${binary:Package}\t${Status}\n' 'postgresql-18*' 'postgresql-client-18*' 2>/dev/null | awk '$2=="install" && $3=="ok" && $4=="installed" {print $1}' | grep -E '^postgresql(-client)?-18([:-].*)?$' || true)
+            if (( ${#pg18_packages[@]} > 0 )); then
+              sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get -o DPkg::Lock::Timeout=120 -y purge "${pg18_packages[@]}"
+            fi
+            while IFS= read -r source_file; do
+              [[ -n "${source_file}" ]] || continue
+              sudo rm -f -- "${source_file}"
+            done < <(grep -Rsl 'apt.postgresql.org/pub/repos/apt' /etc/apt/sources.list.d 2>/dev/null || true)
+            sudo apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 update
+          fi
+          if command -v pg_lsclusters >/dev/null 2>&1 && pg_lsclusters --no-header 2>/dev/null | grep -q .; then
+            echo 'Disposable runner still has PostgreSQL clusters after cleanup.' >&2
+            exit 1
+          fi
+          if [[ -x /usr/lib/postgresql/18/bin/postgres || -e /etc/postgresql/18 || -e /var/lib/postgresql/18 ]]; then
+            echo 'Disposable runner still has PostgreSQL 18 state after package/cluster cleanup.' >&2
+            exit 1
+          fi
+          if grep -Rqs 'apt.postgresql.org/pub/repos/apt' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+            echo 'Disposable runner still has a PGDG source after cleanup.' >&2
+            exit 1
+          fi
+          if ss -H -ltn 'sport = :5432' | grep -q .; then
+            echo 'Disposable runner TCP/5432 remains occupied; refusing to reclaim it.' >&2
+            exit 1
+          fi
+          sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestPostgreSQL18InstallerAcceptance$' -count=1 -v
+          if [[ -x /usr/lib/postgresql/18/bin/postgres || -e /etc/postgresql/18 || -e /var/lib/postgresql/18 ]]; then
+            echo 'PostgreSQL 18 remained installed/configured after acceptance rollback.' >&2
+            exit 1
+          fi
+          if systemctl is-active --quiet postgresql@18-main 2>/dev/null; then
+            echo 'PostgreSQL 18 cluster remained active after acceptance rollback.' >&2
+            exit 1
+          fi
+          if [[ -e /etc/apt/sources.list.d/hyzorax-pgdg.sources || -e /etc/apt/keyrings/hyzorax-pgdg.asc ]]; then
+            echo 'HYZoraX PGDG repository files remained after rollback.' >&2
+            exit 1
+          fi
+      - name: Build and verify V1.6.3
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.6.3
+          ./build/hyzorax-control -version | grep -q '1.6.3'
+          ./build/hyzorax-control-helper -version | grep -q '1.6.3'
+          grep -q 'const ProtocolVersion = 13' internal/helper/protocol.go
+          test "$(sha256sum build/hz | awk '{print $1}')" = "$(cat /tmp/hz-before.sha)"
+          (cd build && sha256sum -c SHA256SUMS)
+      - name: Package release assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+      - name: Publish V1.6.3 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.6.3 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.6.3 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.6.3' \
+            --notes 'PostgreSQL 18 core-installer acceptance for Ubuntu 24.04 using the official PostgreSQL PGDG repository. HYZoraX downloads the official ACCC4CF8.asc key over HTTPS, verifies the pinned PostgreSQL-published fingerprint B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8, and writes a dedicated Signed-By noble-pgdg source. Clean-install mode refuses existing PostgreSQL 18, any configured PostgreSQL cluster, an existing PGDG source, or occupied TCP/5432. Health requires PostgreSQL 18.x, port 5432, localhost-only listen_addresses, no wildcard listener, pg_isready, active postgresql@18-main, and scram-sha-256 password encryption. Rollback is ownership-marker guarded before dropping the HYZoraX-created 18/main cluster. Helper protocol V13. No new hz menu entry and no browser Installer UI is exposed yet.' \
+            --latest
