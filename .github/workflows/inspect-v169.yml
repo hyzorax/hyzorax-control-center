@@ -22,17 +22,13 @@ jobs:
           mkdir -p work
           gh release download v1.6.8 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
           tar -xzf /tmp/base.tar.gz -C work
-      - name: Inspect applications and editor UI
+      - name: Inspect editor save and dialog wiring
         run: |
           set -Eeuo pipefail
           cd work/hyzorax-control
-          echo '===== APPLICATIONS HTML ====='
-          sed -n '35,180p' internal/web/static/index.html
-          echo '===== EDITOR HTML MARKERS ====='
-          grep -n -B25 -A90 -E 'editor-dialog|editor-workspace|editor-tree|editor-tabs|editor-textarea|editor-save' internal/web/static/index.html | head -n 420 || true
-          echo '===== APPLICATIONS CSS ====='
-          grep -n -B5 -A80 -E 'applications-view|application-card|application-grid|application-status' internal/web/static/app.css | head -n 420 || true
-          echo '===== EDITOR CSS ====='
-          grep -n -B5 -A120 -E 'editor-dialog|editor-workspace|editor-tree|editor-tabs|editor-code|editor-status|editor-toolbar' internal/web/static/app.css | head -n 520 || true
-          echo '===== EDITOR JS ====='
-          grep -n -B8 -A70 -E 'openTextEditor|loadEditor|editorTree|saveEditor|editor-save|editor-tabs|editor-text' internal/web/static/app.js | head -n 620 || true
+          echo '===== EDITOR FUNCTIONS ====='
+          sed -n '575,625p' internal/web/static/app.js
+          echo '===== EDITOR EVENT WIRING ====='
+          sed -n '730,900p' internal/web/static/app.js
+          echo '===== DIALOG HELPERS ====='
+          grep -n -B5 -A35 -E 'function openDialog|function closeDialog|data-close-dialog' internal/web/static/app.js | head -n 260 || true
