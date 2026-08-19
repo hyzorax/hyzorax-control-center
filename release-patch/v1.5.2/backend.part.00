@@ -1,0 +1,203 @@
+diff -ruN '--exclude=app.js' '--exclude=app.css' '--exclude=index.html' a/internal/helper/filesystem_linux.go b/internal/helper/filesystem_linux.go
+--- a/internal/helper/filesystem_linux.go	2026-08-18 21:19:15.000000000 +0000
++++ b/internal/helper/filesystem_linux.go	2026-08-19 00:02:55.597017256 +0000
+@@ -34,6 +34,7 @@
+ 	maxEditableBytes      = 1 * 1024 * 1024
+ 	maxCopyBytes          = 256 * 1024 * 1024
+ 	maxCopyEntries        = 5000
++	maxDeleteEntries      = 5000
+ 	maxFilesystemPath     = 4096
+ 	maxFilesystemName     = 255
+ 	maxHelperRequestBytes = 12 * 1024 * 1024
+@@ -58,6 +59,7 @@
+ 	Renamable     bool   `json:"renamable"`
+ 	Copyable      bool   `json:"copyable"`
+ 	Movable       bool   `json:"movable"`
++	Deletable     bool   `json:"deletable"`
+ }
+ 
+ type filesystemCreateDirectoryParams struct {
+@@ -93,6 +95,43 @@
+ 	Entries int
+ }
+ 
++type filesystemDeleteBudget struct {
++	Entries int
++}
++
++var protectedFilesystemDeletePaths = map[string]struct{}{
++	"/bin":                     {},
++	"/boot":                    {},
++	"/dev":                     {},
++	"/etc":                     {},
++	"/lib":                     {},
++	"/lib64":                   {},
++	"/opt":                     {},
++	"/proc":                    {},
++	"/root":                    {},
++	"/run":                     {},
++	"/sbin":                    {},
++	"/sys":                     {},
++	"/usr":                     {},
++	"/var":                     {},
++	"/etc/fstab":               {},
++	"/etc/group":               {},
++	"/etc/gshadow":             {},
++	"/etc/hosts":               {},
++	"/etc/passwd":              {},
++	"/etc/resolv.conf":         {},
++	"/etc/shadow":              {},
++	"/etc/sudoers":             {},
++	"/etc/hyzorax-control":     {},
++	"/opt/hyzorax-control":     {},
++	"/var/lib/hyzorax-control": {},
++}
++
++func isProtectedFilesystemDeletePath(path string) bool {
++	_, protected := protectedFilesystemDeletePaths[path]
++	return protected
++}
++
+ func filesystemList(ctx context.Context, rawPath string) (map[string]any, *Error) {
+ 	cleanPath, pathError := validateFilesystemPath(rawPath)
+ 	if pathError != nil {
+@@ -151,6 +190,7 @@
+ 			Renamable:    (kind == "file" || kind == "directory") && !mountBoundary,
+ 			Copyable:     (kind == "file" || kind == "directory") && !mountBoundary,
+ 			Movable:      (kind == "file" || kind == "directory") && !mountBoundary,
++			Deletable:    (kind == "file" || kind == "directory") && !mountBoundary && !isProtectedFilesystemDeletePath(entryPath),
+ 		}
+ 		if kind == "symlink" {
+ 			target, readError := os.Readlink(entryPath)
+@@ -605,6 +645,227 @@
+ 	}, nil
+ }
+ 
++func filesystemDelete(ctx context.Context, rawPath string) (map[string]any, *Error) {
++	cleanPath, pathError := validateFilesystemPath(rawPath)
++	if pathError != nil {
++		return nil, pathError
++	}
++	if cleanPath == string(os.PathSeparator) {
++		return nil, &Error{Code: "root_path_denied", Message: "the filesystem root cannot be deleted"}
++	}
++	if isProtectedFilesystemDeletePath(cleanPath) {
++		return nil, &Error{Code: "protected_path_denied", Message: "this critical system or HYZoraX path cannot be deleted through the guarded file manager"}
++	}
++	if err := ctx.Err(); err != nil {
++		return nil, &Error{Code: "operation_timeout", Message: "filesystem request timed out"}
++	}
++
++	parentPath := filepath.Dir(cleanPath)
++	name := filepath.Base(cleanPath)
++	parent, openError := openFilesystemPath(parentPath, unix.O_RDONLY|unix.O_DIRECTORY)
++	if openError != nil {
++		return nil, filesystemError(openError, "delete parent directory could not be opened")
++	}
++	defer parent.Close()
++	parentStat, statError := filesystemFDStat(parent)
++	if statError != nil {
++		return nil, filesystemError(statError, "delete parent directory metadata could not be read")
++	}
++
++	source, operationError := inspectFilesystemDeleteSourceAt(int(parent.Fd()), name)
++	if operationError != nil {
++		return nil, operationError
++	}
++	if uint64(source.Stat.Dev) != uint64(parentStat.Dev) {
++		return nil, &Error{Code: "mount_boundary_denied", Message: "mount-boundary paths cannot be deleted"}
++	}
++
++	budget := &filesystemDeleteBudget{}
++	if operationError := filesystemDeletePreflightAt(ctx, int(parent.Fd()), name, uint64(source.Stat.Dev), budget); operationError != nil {
++		return nil, operationError
++	}
++	if err := ctx.Err(); err != nil {
++		return nil, &Error{Code: "operation_timeout", Message: "filesystem request timed out"}
++	}
++
++	var stagedName string
++	for attempt := 0; attempt < 8; attempt++ {
++		generated, err := filesystemDeleteTempName()
++		if err != nil {
++			return nil, &Error{Code: "operation_failed", Message: "delete staging name could not be generated"}
++		}
++		stagedName = generated
++		err = unix.Renameat2(int(parent.Fd()), name, int(parent.Fd()), stagedName, unix.RENAME_NOREPLACE)
++		if err == nil {
++			break
++		}
++		if !errors.Is(err, unix.EEXIST) {
++			return nil, filesystemError(err, "file or directory could not be staged for deletion")
++		}
++		stagedName = ""
++	}
++	if stagedName == "" {
++		return nil, &Error{Code: "operation_failed", Message: "a unique delete staging name could not be allocated"}
++	}
++
++	var stagedStat unix.Stat_t
++	if err := unix.Fstatat(int(parent.Fd()), stagedName, &stagedStat, unix.AT_SYMLINK_NOFOLLOW); err != nil || uint64(stagedStat.Dev) != uint64(source.Stat.Dev) || stagedStat.Ino != source.Stat.Ino {
++		if err == nil {
++			err = unix.EBUSY
++		}
++		_ = unix.Renameat2(int(parent.Fd()), stagedName, int(parent.Fd()), name, unix.RENAME_NOREPLACE)
++		return nil, &Error{Code: "path_changed", Message: "filesystem path changed during delete; refresh the directory before continuing"}
++	}
++
++	// Once the original path has been atomically isolated under a private staging
++	// name, complete the bounded removal even if the request context is cancelled.
++	// This avoids leaving half-deleted content under the user's original path.
++	if err := removeFilesystemDeleteTreeAt(int(parent.Fd()), stagedName, uint64(source.Stat.Dev)); err != nil {
++		return nil, filesystemError(err, "staged delete could not be completed")
++	}
++	_ = unix.Fsync(int(parent.Fd()))
++	return map[string]any{
++		"path":    cleanPath,
++		"name":    name,
++		"kind":    source.Kind,
++		"entries": budget.Entries,
++	}, nil
++}
++
++func inspectFilesystemDeleteSourceAt(parentFD int, name string) (*filesystemCopySource, *Error) {
++	fd, err := unix.Openat2(parentFD, name, &unix.OpenHow{
++		Flags:   uint64(unix.O_PATH | unix.O_CLOEXEC | unix.O_NOFOLLOW),
++		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS,
++	})
++	if err != nil {
++		return nil, filesystemError(err, "delete source could not be opened")
++	}
++	file := os.NewFile(uintptr(fd), name)
++	defer file.Close()
++	info, err := file.Stat()
++	if err != nil {
++		return nil, filesystemError(err, "delete source metadata could not be read")
++	}
++	stat, ok := info.Sys().(*syscall.Stat_t)
++	if !ok {
++		return nil, &Error{Code: "operation_failed", Message: "delete source metadata is unavailable"}
++	}
++	kind := filesystemKind(info.Mode())
++	if kind == "symlink" {
++		return nil, &Error{Code: "symlink_denied", Message: "symlinks cannot be deleted through the guarded file manager"}
++	}
++	if kind != "file" && kind != "directory" {
++		return nil, &Error{Code: "unsupported_file_type", Message: "only regular files and directories can be deleted"}
++	}
++	return &filesystemCopySource{Info: info, Stat: stat, Kind: kind}, nil
++}
++
++func (budget *filesystemDeleteBudget) reserve() *Error {
++	if budget.Entries >= maxDeleteEntries {
++		return &Error{Code: "delete_too_large", Message: "delete exceeds the guarded 5,000-entry limit"}
++	}
++	budget.Entries++
++	return nil
++}
++
++func filesystemDeletePreflightAt(ctx context.Context, parentFD int, name string, allowedDev uint64, budget *filesystemDeleteBudget) *Error {
++	if err := ctx.Err(); err != nil {
++		return &Error{Code: "operation_timeout", Message: "filesystem request timed out"}
++	}
++	source, operationError := inspectFilesystemDeleteS
