@@ -1,0 +1,19 @@
+
+# ---------- V1.5.2 regression fixes ----------
+helper_test = root / "internal/helper/filesystem_linux_test.go"
+text = helper_test.read_text(encoding="utf-8")
+if '\n\t"errors"\n' not in text:
+    if 'import (\n\t"context"' not in text:
+        raise SystemExit("helper test import marker missing")
+    text = text.replace('import (\n\t"context"', 'import (\n\t"context"\n\t"errors"', 1)
+helper_test.write_text(text, encoding="utf-8")
+
+text = app_test.read_text(encoding="utf-8")
+old = '`data-view="files"`, `Guarded write access`, `id="file-path-form"`'
+new = '`data-view="files"`, `id="file-path-form"`'
+if old not in text:
+    raise SystemExit("obsolete Guarded write access regression marker missing")
+text = text.replace(old, new, 1)
+app_test.write_text(text, encoding="utf-8")
+
+print("Applied V1.5.2 regression fixes")
