@@ -1,0 +1,121 @@
+name: Build and release V1.6.1 Nginx Installer
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build-v161:
+    if: github.event.pull_request.head.ref == 'agent/v1.6.1-nginx-installer'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Download V1.6.0 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.6.0 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+          sha256sum work/hyzorax-control/packaging/hz | awk '{print $1}' > /tmp/hz-before.sha
+          grep -q 'const ProtocolVersion = 10' work/hyzorax-control/internal/helper/protocol.go
+      - name: Apply V1.6.1
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.6.1/apply.py
+          python3 release-patch/v1.6.1/apply.py work/hyzorax-control
+          cd work/hyzorax-control
+          gofmt -w internal/installer/*.go internal/helper/*.go internal/web/assets_test.go internal/httpapi/app_test.go
+      - name: Static and security checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hz
+          test "$(sha256sum packaging/hz | awk '{print $1}')" = "$(cat /tmp/hz-before.sha)"
+          grep -q 'Version 1.6.1' internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 11' internal/helper/protocol.go
+          grep -q 'func NginxManifest' internal/installer/builtin.go
+          grep -q 'installer.nginx.preflight' internal/helper/server_linux.go
+          grep -q 'installer.nginx.install' internal/helper/server_linux.go
+          grep -q 'installer.nginx.health' internal/helper/server_linux.go
+          grep -q 'installer.nginx.rollback' internal/helper/server_linux.go
+          grep -q 'TCP port 80 is already in use' internal/helper/installer_nginx_linux.go
+          grep -q 'firewall_changed.*false' internal/helper/installer_nginx_linux.go
+          if grep -Rni --include='*.go' -E 'request\.Params.*(package|command)|exec\.CommandContext\(ctx, [^"/]' internal/helper/installer_nginx_linux.go; then
+            echo 'Nginx installer appears to accept dynamic command/package execution' >&2
+            exit 1
+          fi
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+      - name: Real Ubuntu 24.04 Nginx acceptance
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          if dpkg-query -W -f='${Status}' nginx 2>/dev/null | grep -q 'install ok installed'; then
+            echo 'Hosted runner unexpectedly already has Nginx installed; refusing to mask preflight behavior.' >&2
+            exit 1
+          fi
+          if [[ -e /etc/nginx ]]; then
+            echo 'Hosted runner unexpectedly has /etc/nginx; refusing destructive cleanup.' >&2
+            exit 1
+          fi
+          if ss -H -ltn 'sport = :80' | grep -q .; then
+            echo 'Hosted runner TCP/80 is occupied; Nginx installer correctly requires a clean port.' >&2
+            exit 1
+          fi
+          sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestNginxInstallerAcceptance$' -count=1 -v
+          if dpkg-query -W -f='${Status}' nginx 2>/dev/null | grep -q 'install ok installed'; then
+            echo 'Nginx remained installed after acceptance rollback.' >&2
+            exit 1
+          fi
+          if systemctl is-active --quiet nginx 2>/dev/null; then
+            echo 'Nginx remained active after acceptance rollback.' >&2
+            exit 1
+          fi
+      - name: Build and verify V1.6.1
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.6.1
+          ./build/hyzorax-control -version | grep -q '1.6.1'
+          ./build/hyzorax-control-helper -version | grep -q '1.6.1'
+          grep -q 'const ProtocolVersion = 11' internal/helper/protocol.go
+          test "$(sha256sum build/hz | awk '{print $1}')" = "$(cat /tmp/hz-before.sha)"
+          (cd build && sha256sum -c SHA256SUMS)
+      - name: Package release assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+      - name: Publish V1.6.1 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.6.1 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.6.1 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.6.1' \
+            --notes 'First real core-installer acceptance on the V1.6.0 engine. Adds the built-in Ubuntu 24.04 Nginx manifest plus fixed privileged helper actions for Nginx preflight, install, health verification and rollback. The clean-install path refuses existing Nginx/config and occupied TCP/80, never reclaims a port, and does not change firewall policy. GitHub Actions validates a real Nginx apt install, nginx -t, active service, localhost HTTP response, then rollback/purge on an isolated Ubuntu 24.04 runner. Helper protocol V11. No new hz menu entry and no browser Installer UI is exposed yet.' \
+            --latest
