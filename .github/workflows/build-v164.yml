@@ -53,8 +53,8 @@ jobs:
           grep -q 'installer.redis.install' internal/helper/server_linux.go
           grep -q 'installer.redis.health' internal/helper/server_linux.go
           grep -q 'installer.redis.rollback' internal/helper/server_linux.go
-          grep -q 'protected-mode","yes"' internal/helper/installer_redis_linux.go
-          grep -q 'appendonly","yes"' internal/helper/installer_redis_linux.go
+          grep -Eq 'redisSetDirective\(text, "protected-mode", "yes"\)' internal/helper/installer_redis_linux.go
+          grep -Eq 'redisSetDirective\(text, "appendonly", "yes"\)' internal/helper/installer_redis_linux.go
           grep -q '127.0.0.1 ::1' internal/helper/installer_redis_linux.go
           if grep -Rni --include='installer_redis_linux.go' -E 'request\.Params.*(package|command|config)|/bin/sh|bash -c|exec\.CommandContext\(ctx, executable' internal/helper; then
             echo 'Redis installer appears to accept dynamic privileged execution' >&2
