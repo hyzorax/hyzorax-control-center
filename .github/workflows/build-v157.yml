@@ -36,8 +36,9 @@ jobs:
       - name: Apply V1.5.7
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.5.7/apply.py
+          python3 -m py_compile release-patch/v1.5.7/apply.py release-patch/v1.5.7/fix.py
           python3 release-patch/v1.5.7/apply.py work/hyzorax-control
+          python3 release-patch/v1.5.7/fix.py work/hyzorax-control
           cd work/hyzorax-control
           gofmt -w cmd/hyzorax-control/main.go cmd/hyzorax-control/main_test.go internal/store/store.go internal/httpapi/app.go internal/httpapi/handlers.go internal/httpapi/middleware.go internal/httpapi/app_test.go internal/installer/plan.go internal/installer/plan_test.go
           test "$(sha256sum packaging/hz | awk '{print $1}')" = "$(cat /tmp/hz-before.sha)"
