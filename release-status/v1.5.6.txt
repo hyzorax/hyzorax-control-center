@@ -1,0 +1,17 @@
+status=success
+version=1.5.6
+scope=editor-ux
+features=editor-maximize-restore,panel-find,match-navigation,line-column-status,aapanel-inspired-layout
+helper_protocol=10
+editor_maximize=browser-viewport
+editor_find=ctrl-cmd-f
+find_navigation=enter-shift-enter-f3-shift-f3
+editor_save=ctrl-cmd-s
+line_numbers=enabled
+utf8=enabled
+native_browser_confirm=forbidden
+release_run_id=32224417444
+release_job_id=95981116435
+release_tag=v1.5.6
+checksum_asset=HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+patch_merge_commit=a8c2216d48a4f88d918b896530dd5c461f7bf31a
