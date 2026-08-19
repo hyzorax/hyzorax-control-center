@@ -1,0 +1,43 @@
+name: Inspect V1.6.0 source for V1.6.1 Nginx
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-v161:
+    if: github.event.pull_request.head.ref == 'agent/v1.6.1-nginx-installer'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download V1.6.0 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.6.0 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+      - name: Inspect helper service and installer internals
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          echo '===== helper dispatch 90-340 ====='
+          sed -n '90,350p' internal/helper/server_linux.go
+          echo '===== helper policy ====='
+          sed -n '1,280p' internal/helper/policy.go
+          echo '===== service helper ====='
+          grep -Rni -C 8 -E 'serviceStatus|systemctl|journalctl|launchPanelUpdate' internal/helper | head -n 1000 || true
+          echo '===== installer V1.6.0 ====='
+          find internal/installer -maxdepth 1 -type f -print -exec sh -c 'echo "--- $1"; sed -n "1,360p" "$1"' _ {} \;
+          echo '===== packaging/systemd ====='
+          sed -n '1,260p' packaging/hyzorax-control-helper.service
+          sed -n '1,280p' packaging/config.toml
+          echo '===== app construction/store/helper ====='
+          sed -n '1,240p' internal/httpapi/app.go
+          sed -n '1,220p' cmd/hyzorax-control/main.go
