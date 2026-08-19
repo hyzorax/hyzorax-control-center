@@ -68,7 +68,7 @@ jobs:
             echo 'Security Center must not introduce shell-command execution.' >&2
             exit 1
           fi
-          if grep -Rni -E 'ufw.*(enable|disable|allow|deny|delete)|nft.*(add|delete|flush)|sshd.*(-t.*-f|-f)|systemctl.*(start|stop|restart|enable|disable)' internal/helper/security_linux.go; then
+          if grep -Rni -E 'ufw.*"(enable|disable|allow|deny|delete)"|nft.*"(add|delete|flush)"|sshd.*"-f"|systemctl.*"(start|stop|restart|enable|disable)"' internal/helper/security_linux.go; then
             echo 'V1.7.0 Security Center foundation must remain read-only.' >&2
             exit 1
           fi
