@@ -1,0 +1,14 @@
+status=success
+version=1.5.8
+scope=hz-live-username-ssh-lastlog-cleanup
+helper_protocol=10
+hz_panel_detail_username=live-configured-owner
+hz_menu=unchanged
+ssh_last_login=hidden
+ssh_authentication_policy=unchanged
+sshd_dropin=/etc/ssh/sshd_config.d/60-hyzorax-no-lastlog.conf
+sshd_validation=required-before-reload
+release_run_id=32232261991
+release_job_id=96004450896
+release_tag=v1.5.8
+merge_commit=07d0cb0f6ab9f3e50f6ebc44c1846f5ce384f8b4
