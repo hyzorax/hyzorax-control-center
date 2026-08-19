@@ -35,10 +35,11 @@ jobs:
       - name: Apply V1.5.6
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.5.6/apply.py
+          python3 -m py_compile release-patch/v1.5.6/apply.py release-patch/v1.5.6/testfix.py
           python3 release-patch/v1.5.6/apply.py work/hyzorax-control
+          python3 release-patch/v1.5.6/testfix.py work/hyzorax-control
           cd work/hyzorax-control
-          gofmt -w internal/web/assets_test.go
+          gofmt -w internal/web/assets_test.go internal/httpapi/app_test.go
 
       - name: Static editor checks
         run: |
