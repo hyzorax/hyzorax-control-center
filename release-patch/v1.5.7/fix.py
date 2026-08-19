@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 import sys
 
 if len(sys.argv) != 2:
@@ -34,11 +35,18 @@ if old not in main:
     raise SystemExit("Owner initializer variable marker not found")
 main_path.write_text(main.replace(old, new, 1), encoding="utf-8")
 
+# Normalize every embedded interface version marker, including the sidebar
+# footer carried forward by older File Manager release patches.
+index_path = root / "internal/web/static/index.html"
+index = index_path.read_text(encoding="utf-8")
+index = re.sub(r'Version 1\.5\.[0-6]', 'Version 1.5.7', index)
+index = re.sub(r'>1\.5\.[0-6]<', '>1.5.7<', index)
+index_path.write_text(index, encoding="utf-8")
+
 # Keep embedded-interface regression test aligned with the shipped release.
 assets_path = root / "internal/web/assets_test.go"
 assets = assets_path.read_text(encoding="utf-8")
-if '1.5.0' not in assets:
-    raise SystemExit("embedded asset release-version marker not found")
-assets_path.write_text(assets.replace('1.5.0', '1.5.7'), encoding="utf-8")
+assets = re.sub(r'1\.5\.[0-6]', '1.5.7', assets)
+assets_path.write_text(assets, encoding="utf-8")
 
-print("Normalized V1.5.7 editor boundary, CLI initializer and asset version test")
+print("Normalized V1.5.7 editor boundary, CLI initializer and all interface version markers")
