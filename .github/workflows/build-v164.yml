@@ -34,8 +34,9 @@ jobs:
       - name: Apply V1.6.4
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.6.4/apply.py
+          python3 -m py_compile release-patch/v1.6.4/apply.py release-patch/v1.6.4/fix_manifest.py
           python3 release-patch/v1.6.4/apply.py work/hyzorax-control
+          python3 release-patch/v1.6.4/fix_manifest.py work/hyzorax-control
           cd work/hyzorax-control
           gofmt -w internal/installer/*.go internal/helper/*.go internal/web/assets_test.go internal/httpapi/app_test.go
       - name: Static and security checks
