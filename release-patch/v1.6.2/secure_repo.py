@@ -7,14 +7,21 @@ if len(sys.argv)!=2: raise SystemExit('usage: secure_repo.py <source-root>')
 root=Path(sys.argv[1]).resolve()
 path=root/'internal/helper/installer_php84_linux.go'
 text=path.read_text(encoding='utf-8')
-text=text.replace('const php84PPA = "ppa:ondrej/php"\nconst php84RepositoryURL = "ppa.launchpadcontent.net/ondrej/php/ubuntu"\nconst php84RepositoryFingerprint = "B8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6"', '''const php84RepositoryURL = "ppa.launchpadcontent.net/ondrej/php/ubuntu"
+old_constants='''const php84PPA = "ppa:ondrej/php"
+const php84RepositoryURL = "ppa.launchpadcontent.net/ondrej/php/ubuntu"
+const php84RepositoryFingerprint = "B8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6"'''
+new_constants='''const php84RepositoryURL = "ppa.launchpadcontent.net/ondrej/php/ubuntu"
 const php84RepositoryFingerprint = "B8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6"
 const php84KeyURL = "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6"
 const php84KeyringPath = "/etc/apt/keyrings/hyzorax-ondrej-php.gpg"
-const php84SourcePath = "/etc/apt/sources.list.d/hyzorax-ondrej-php.sources"''')
+const php84SourcePath = "/etc/apt/sources.list.d/hyzorax-ondrej-php.sources"'''
+if old_constants not in text: raise SystemExit('PHP repository constants marker not found')
+text=text.replace(old_constants,new_constants,1)
 text=text.replace('strings.Contains(string(content), php84RepositoryURL) || strings.Contains(string(content), php84PPA)', 'strings.Contains(string(content), php84RepositoryURL)')
 
-prereq_pattern=re.compile(r'func php84AptPrerequisites\(ctx context\.Context\) error \{.*?\n\}',re.DOTALL)
+start=text.find('func php84AptPrerequisites(ctx context.Context) error {')
+end=text.find('\nfunc php84AptUpdate(ctx context.Context)',start)
+if start<0 or end<0: raise SystemExit('PHP prerequisite function boundary not found')
 new_prereq=r'''func php84AptPrerequisites(ctx context.Context) error {
     args := []string{"-o", "DPkg::Lock::Timeout=120", "-o", "Acquire::Retries=3", "-y", "--no-install-recommends", "install", "ca-certificates", "curl", "gnupg"}
     command := exec.CommandContext(ctx, "/usr/bin/apt-get", args...)
@@ -22,10 +29,11 @@ new_prereq=r'''func php84AptPrerequisites(ctx context.Context) error {
     _, err := command.CombinedOutput()
     return err
 }'''
-text,count=prereq_pattern.subn(new_prereq,text,count=1)
-if count!=1: raise SystemExit('php84AptPrerequisites marker not found')
+text=text[:start]+new_prereq+text[end:]
 
-repo_pattern=re.compile(r'func php84AddRepository\(ctx context\.Context\) error \{.*?\n\}\nfunc php84RemoveRepository\(ctx context\.Context\) error \{.*?\n\}\n\nfunc php84VerifyRepository\(ctx context\.Context\) error \{.*?\n\}',re.DOTALL)
+start=text.find('func php84AddRepository(ctx context.Context) error {')
+end=text.find('\nfunc php84Systemctl(ctx context.Context',start)
+if start<0 or end<0: raise SystemExit('PHP repository helper boundaries not found')
 new_repo=r'''func php84AddRepository(ctx context.Context) error {
     if err := os.MkdirAll("/etc/apt/keyrings", 0755); err != nil { return err }
     keyFile, err := os.CreateTemp("", "hyzorax-ondrej-php-key-*.asc")
@@ -49,8 +57,8 @@ new_repo=r'''func php84AddRepository(ctx context.Context) error {
 
 func php84RemoveRepository(ctx context.Context) error {
     var first error
-    for _, path := range []string{php84SourcePath, php84KeyringPath} {
-        if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) && first == nil { first = err }
+    for _, managedPath := range []string{php84SourcePath, php84KeyringPath} {
+        if err := os.Remove(managedPath); err != nil && !errors.Is(err, os.ErrNotExist) && first == nil { first = err }
     }
     return first
 }
@@ -75,8 +83,7 @@ func php84VerifyRepository(ctx context.Context) error {
     if !strings.Contains(source, "URIs: https://ppa.launchpadcontent.net/ondrej/php/ubuntu") || !strings.Contains(source, "Suites: noble") || !strings.Contains(source, "Signed-By: "+php84KeyringPath) { return errors.New("HYZoraX PHP repository source is not the pinned Noble source") }
     return php84VerifyKeyring(ctx)
 }'''
-text,count=repo_pattern.subn(new_repo,text,count=1)
-if count!=1: raise SystemExit(f'repository helper block replacement count={count}')
+text=text[:start]+new_repo+text[end:]
 if 'add-apt-repository' in text or 'php84PPA' in text: raise SystemExit('legacy PPA helper remains')
 path.write_text(text,encoding='utf-8')
 print('Pinned PHP repository to HYZoraX-managed keyring/source')
