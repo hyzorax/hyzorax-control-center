@@ -1,0 +1,114 @@
+
++		}
++		response.OK = true
++		response.Data = data
++		return response
++	case "filesystem.delete":
++		data, operationError := filesystemDelete(ctx, request.Target)
++		if operationError != nil {
++			response.Error = operationError
++			return response
+ 		}
+ 		response.OK = true
+ 		response.Data = data
+--- a/internal/httpapi/app.go	2026-08-18 21:19:15.000000000 +0000
++++ b/internal/httpapi/app.go	2026-08-19 00:02:55.451561354 +0000
+@@ -77,6 +77,7 @@
+ 	mux.Handle("POST /api/v1/files/rename", a.requireAuth(http.HandlerFunc(a.handleFileRename)))
+ 	mux.Handle("POST /api/v1/files/copy", a.requireAuth(http.HandlerFunc(a.handleFileCopy)))
+ 	mux.Handle("POST /api/v1/files/move", a.requireAuth(http.HandlerFunc(a.handleFileMove)))
++	mux.Handle("POST /api/v1/files/delete", a.requireAuth(http.HandlerFunc(a.handleFileDelete)))
+ 	mux.Handle("GET /api/v1/files/text", a.requireAuth(http.HandlerFunc(a.handleTextFileRead)))
+ 	mux.Handle("PUT /api/v1/files/text", a.requireAuth(http.HandlerFunc(a.handleTextFileWrite)))
+ 
+--- a/internal/httpapi/handlers.go	2026-08-18 21:19:15.000000000 +0000
++++ b/internal/httpapi/handlers.go	2026-08-19 00:02:55.451486042 +0000
+@@ -61,6 +61,10 @@
+ 	Name                 string `json:"name"`
+ }
+ 
++type deleteFileRequest struct {
++	Path string `json:"path"`
++}
++
+ func (a *App) handleHealth(writer http.ResponseWriter, request *http.Request) {
+ 	ctx, cancel := contextWithTimeout(request, 2*time.Second)
+ 	defer cancel()
+@@ -347,6 +351,23 @@
+ 	writeJSON(writer, http.StatusOK, response.Data)
+ }
+ 
++func (a *App) handleFileDelete(writer http.ResponseWriter, request *http.Request) {
++	var input deleteFileRequest
++	if !decodeJSON(writer, request, &input) {
++		return
++	}
++	response, ok := a.callFilesystemHelper(writer, request, "filesystem.delete", input.Path)
++	if !ok {
++		return
++	}
++	a.audit(request, "filesystem.delete", input.Path, "success", map[string]any{
++		"name":    response.Data["name"],
++		"kind":    response.Data["kind"],
++		"entries": response.Data["entries"],
++	})
++	writeJSON(writer, http.StatusOK, response.Data)
++}
++
+ func (a *App) handleTextFileRead(writer http.ResponseWriter, request *http.Request) {
+ 	target := request.URL.Query().Get("path")
+ 	response, ok := a.callFilesystemHelper(writer, request, "filesystem.text.read", target)
+@@ -419,9 +440,9 @@
+ 		return http.StatusNotFound
+ 	case "path_exists", "content_conflict", "path_changed", "cross_filesystem_move_denied":
+ 		return http.StatusConflict
+-	case "symlink_denied", "hardlink_denied", "permission_denied", "root_path_denied", "mount_boundary_denied", "unsupported_file_type":
++	case "symlink_denied", "hardlink_denied", "permission_denied", "root_path_denied", "mount_boundary_denied", "unsupported_file_type", "protected_path_denied":
+ 		return http.StatusForbidden
+-	case "file_too_large", "copy_too_large":
++	case "file_too_large", "copy_too_large", "delete_too_large":
+ 		return http.StatusRequestEntityTooLarge
+ 	case "operation_timeout":
+ 		return http.StatusGatewayTimeout
+--- a/internal/httpapi/files_test.go	2026-08-18 21:19:15.000000000 +0000
++++ b/internal/httpapi/files_test.go	2026-08-19 00:03:28.679694852 +0000
+@@ -188,6 +188,12 @@
+ 	if moved["path"] != "/srv/archive/config-moved.txt" || fake.movedPath != "/srv/archive/config-moved.txt" {
+ 		t.Fatalf("move did not reach helper: response=%#v helper_path=%q", moved, fake.movedPath)
+ 	}
++	deleted := postJSON(t, client, panelRoot+"/api/v1/files/delete", map[string]any{
++		"path": "/srv/archive/config-moved.txt",
++	}, csrf, http.StatusOK)
++	if deleted["path"] != "/srv/archive/config-moved.txt" || fake.deletedPath != "/srv/archive/config-moved.txt" {
++		t.Fatalf("delete did not reach helper: response=%#v helper_path=%q", deleted, fake.deletedPath)
++	}
+ }
+ 
+ type fakeFilesystemHelper struct {
+@@ -200,6 +206,7 @@
+ 	renamedPath string
+ 	copiedPath  string
+ 	movedPath   string
++	deletedPath string
+ }
+ 
+ func (f *fakeWriteFilesystemHelper) Call(_ context.Context, request helper.Request) (helper.Response, error) {
+@@ -230,6 +237,9 @@
+ 		_ = json.Unmarshal(request.Params, &params)
+ 		f.movedPath = filepath.Join(params["destination_directory"], params["name"])
+ 		response.Data = map[string]any{"source_path": request.Target, "path": f.movedPath, "name": params["name"], "kind": "file"}
++	case "filesystem.delete":
++		f.deletedPath = request.Target
++		response.Data = map[string]any{"path": request.Target, "name": filepath.Base(request.Target), "kind": "file", "entries": 1}
+ 	case "filesystem.text.read":
+ 		digest := sha256.Sum256([]byte(f.content))
+ 		response.Data = map[string]any{"path": request.Target, "name": filepath.Base(request.Target), "size": len(f.content), "content": f.content, "sha256": hex.EncodeToString(digest[:])}
+@@ -261,7 +271,7 @@
+ 			"path": f.root, "parent": filepath.Dir(f.root), "read_only": false,
+ 			"truncated": false, "max_entries": 1000, "max_download_bytes": 16 * 1024 * 1024, "max_upload_bytes": 8 * 1024 * 1024, "max_edit_bytes": 1024 * 1024,
+ 			"entries": []any{
+-				map[string]any{"name": "hello.txt", "path": f.filePath, "kind": "file", "size": len(f.contents), "owner": "root", "group": "root", "permissions": "0640", "mode": "-rw-r-----", "modified_at": time.Now().UTC().Format(time.RFC3339Nano), "downloadable": true, "editable": true, "renamable": true},
++				map[string]any{"name": "hello.txt", "path": f.filePath, "kind": "file", "size": len(f.contents), "owner": "root", "group": "root", "permissions": "0640", "mode": "-rw-r-----", "modified_at": time.Now().UTC().Format(time.RFC3339Nano), "downloadable": true, "editable": true, "renamable": true, "deletable": true},
+ 				map[string]any{"name": "hello-link", "path": f.linkPath, "kind": "symlink", "size": 0, "owner": "root", "group": "root", "permissions": "0777", "mode": "Lrwxrwxrwx", "modified_at": time.Now().UTC().Format(time.RFC3339Nano), "downloadable": false, "symlink_target": f.filePath},
+ 			},
+ 		}
