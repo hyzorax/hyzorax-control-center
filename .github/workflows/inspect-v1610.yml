@@ -1,0 +1,40 @@
+name: Inspect V1.6.9 core installer catalog
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.event.pull_request.head.ref == 'agent/v1.6.10-core-app-catalog'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download V1.6.9 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.6.9 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+      - name: Inspect core installer actions and Applications UI
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          echo '===== HELPER INSTALLER ACTIONS ====='
+          grep -RnoE 'installer\.[a-zA-Z0-9_.-]+' internal | sort -u || true
+          echo '===== MANIFEST/CATALOG IDS ====='
+          grep -RniE 'nginx|php84|php 8\.4|postgres|redis|node24|composer|fail2ban' internal/installer internal/helper | head -n 900 || true
+          echo '===== APPLICATIONS BACKEND ====='
+          sed -n '1,320p' internal/httpapi/applications.go
+          echo '===== APPLICATIONS ROUTES ====='
+          grep -n -A8 -B5 '/api/v1/applications' internal/httpapi/app.go || true
+          echo '===== APPLICATIONS HTML ====='
+          grep -n -A150 -B10 'id="applications-view"' internal/web/static/index.html | head -n 240 || true
+          echo '===== APPLICATIONS JS ====='
+          grep -n -A180 -B20 -E 'applicationStatusLabel|renderApplication|loadApplications|installApplication|applyApplicationFilters' internal/web/static/app.js | head -n 520 || true
