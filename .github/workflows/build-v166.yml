@@ -1,0 +1,104 @@
+name: Build and release V1.6.6 Composer Installer
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build-v166:
+    if: github.event.pull_request.head.ref == 'agent/v1.6.6-composer-installer'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Download V1.6.5 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.6.5 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          sha256sum work/hyzorax-control/packaging/hz | awk '{print $1}' > /tmp/hz-before.sha
+          grep -q 'const ProtocolVersion = 15' work/hyzorax-control/internal/helper/protocol.go
+      - name: Apply V1.6.6
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.6.6/apply.py
+          python3 release-patch/v1.6.6/apply.py work/hyzorax-control
+          cd work/hyzorax-control
+          gofmt -w internal/installer/*.go internal/helper/*.go internal/web/assets_test.go internal/httpapi/app_test.go
+      - name: Static and security checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hz
+          test "$(sha256sum packaging/hz | awk '{print $1}')" = "$(cat /tmp/hz-before.sha)"
+          grep -q 'Version 1.6.6' internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 16' internal/helper/protocol.go
+          grep -q 'func ComposerManifest' internal/installer/builtin.go
+          grep -q '2.10.2' internal/helper/installer_composer_linux.go
+          grep -q '5ee7125f8a30a34d246cefdc0bc85b8a783b28f2aec968994118512350d28027' internal/helper/installer_composer_linux.go
+          grep -q 'https://getcomposer.org/download/2.10.2/composer.phar' internal/helper/installer_composer_linux.go
+          grep -q 'exec /usr/bin/php8.4' internal/helper/installer_composer_linux.go
+          if grep -Rni --include='installer_composer_linux.go' -E 'request\.Params.*(url|command|path)|/bin/bash|bash -c|exec\.CommandContext\(ctx, executable' internal/helper; then
+            echo 'Composer installer appears to accept dynamic privileged execution' >&2
+            exit 1
+          fi
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+      - name: Real Ubuntu 24.04 Composer acceptance
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          sudo rm -f /usr/local/bin/composer
+          sudo rm -rf /opt/hyzorax/composer-2.10.2
+          sudo rm -f /var/lib/hyzorax-control/installer-managed/composer
+          existing_php=false
+          if [[ -x /usr/bin/php8.4 || -e /etc/php/8.4 ]]; then existing_php=true; fi
+          if [[ "$existing_php" == true ]]; then
+            sudo systemctl stop php8.4-fpm 2>/dev/null || true
+            mapfile -t pkgs < <(dpkg-query -W -f='${binary:Package}\t${Status}\n' 'php8.4*' 2>/dev/null | awk '$2=="install"&&$3=="ok"&&$4=="installed"{print $1}' || true)
+            if (( ${#pkgs[@]} > 0 )); then sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get -y purge "${pkgs[@]}"; fi
+            sudo rm -rf /etc/php/8.4
+            sudo rm -f /etc/apt/sources.list.d/hyzorax-ondrej-php.sources /etc/apt/keyrings/hyzorax-ondrej-php.gpg /var/lib/hyzorax-control/installer-managed/php84
+          fi
+          sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestComposerInstallerAcceptance$' -count=1 -v
+          [[ ! -e /usr/local/bin/composer ]]
+          [[ ! -e /opt/hyzorax/composer-2.10.2 ]]
+      - name: Build and verify V1.6.6
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.6.6
+          ./build/hyzorax-control -version | grep -q '1.6.6'
+          ./build/hyzorax-control-helper -version | grep -q '1.6.6'
+          test "$(sha256sum build/hz | awk '{print $1}')" = "$(cat /tmp/hz-before.sha)"
+          (cd build && sha256sum -c SHA256SUMS)
+      - name: Package release assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+      - name: Publish V1.6.6 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.6.6 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.6.6 HYZoraX_Control_Center_Linux_x86_64.tar.gz HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 --title 'HYZoraX Control Panel V1.6.6' --notes 'Composer 2.10.2 global installer acceptance. HYZoraX downloads the fixed official composer.phar, verifies pinned SHA256, requires PHP 8.4, stores the PHAR under /opt/hyzorax and provides a fixed /usr/local/bin/composer wrapper that always uses /usr/bin/php8.4. Existing command/runtime conflicts are refused and destructive rollback requires HYZoraX ownership. Real PHP 8.4 dependency + Composer download/integrity/version/rollback acceptance runs on Ubuntu 24.04. Helper protocol V16. hz menu unchanged; Installer browser UI not exposed.' --latest
