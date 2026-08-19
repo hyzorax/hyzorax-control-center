@@ -34,7 +34,8 @@ jobs:
       - name: Apply V1.6.1
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.6.1/apply.py
+          python3 -m py_compile release-patch/v1.6.1/prepare.py release-patch/v1.6.1/apply.py
+          python3 release-patch/v1.6.1/prepare.py work/hyzorax-control
           python3 release-patch/v1.6.1/apply.py work/hyzorax-control
           cd work/hyzorax-control
           gofmt -w internal/installer/*.go internal/helper/*.go internal/web/assets_test.go internal/httpapi/app_test.go
