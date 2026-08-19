@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import re, subprocess, sys
+
+if len(sys.argv) != 2:
+    raise SystemExit('usage: apply.py <hyzorax-control-source-root>')
+root=Path(sys.argv[1]).resolve()
+
+def sub_once(text, pattern, replacement, label):
+    out,n=re.subn(pattern,replacement,text,count=1,flags=re.S)
+    if n!=1: raise SystemExit(f'{label}: expected 1 match, got {n}')
+    return out
+
+# backend patch
+patch_path=Path(__file__).resolve().with_name('backend.patch')
+protocol_text=(root/'internal/helper/protocol.go').read_text(encoding='utf-8')
+if 'const ProtocolVersion = 7' in protocol_text:
+    subprocess.run(['patch','-p1','--forward','--batch','-i',str(patch_path)],cwd=root,check=True)
+elif 'const ProtocolVersion = 8' not in protocol_text:
+    raise SystemExit('unexpected helper protocol baseline')
+
+index=root/'internal/web/static/index.html'; jsf=root/'internal/web/static/app.js'; cssf=root/'internal/web/static/app.css'
+assets_test=root/'internal/web/assets_test.go'; app_test=root/'internal/httpapi/app_test.go'
+
+# ---------- HTML ----------
+html=index.read_text()
+if 'Version 1.5.1' not in html: raise SystemExit('V1.5.1 version marker missing')
+html=html.replace('Version 1.5.1','Version 1.5.2',1)
+# Remove oversized duplicate File Manager hero and replace path/toolbar with compact command bar.
+html=sub_once(html,r'''\s*<div class="files-heading">\s*<div>.*?</div>\s*<span class="badge good">.*?</span>\s*</div>\s*\n\s*<form id="file-path-form" class="path-bar">.*?</form>\s*\n\s*<div id="file-breadcrumbs" class="breadcrumbs" aria-label="Current filesystem path"></div>\s*\n\s*<div class="file-toolbar">\s*<div>.*?</div>\s*<small>.*?</small>\s*</div>''',r'''
+          <div class="file-command-bar">
+            <div class="file-location-bar">
+              <button id="file-up-button" class="command-icon" type="button" title="Parent directory" aria-label="Open parent directory">↑</button>
+              <div id="file-breadcrumbs" class="breadcrumbs compact-breadcrumbs" aria-label="Current filesystem path"></div>
+            </div>
+            <div class="file-command-actions">
+              <button id="file-path-button" class="tool-button compact-tool" type="button" title="Open an absolute path">Path</button>
+              <button id="new-folder-button" class="tool-button compact-tool" type="button">＋ New folder</button>
+              <button id="upload-button" class="tool-button compact-tool" type="button">⇧ Upload</button>
+              <button id="file-refresh-button" class="command-icon" type="button" title="Refresh directory" aria-label="Refresh directory">↻</button>
+              <input id="upload-file-input" type="file" hidden>
+            </div>
+          </div>
+          <form id="file-path-form" class="file-path-popover" hidden>
+            <label><span>Absolute path</span><input id="file-path-input" name="path" value="/" autocomplete="off" spellcheck="false" required></label>
+            <div><button type="button" id="file-path-close" class="ghost compact">Cancel</button><button class="primary compact-primary" type="submit">Open</button></div>
+          </form>''','compact file command bar')
+# ensure requested sentence is gone
+html=html.replace('Browse, rename, copy, move, upload and edit guarded server files without exposing a browser terminal.','')
+
+# Replace operation dialogs with exact compact forms.
+rename_dialog=r'''<dialog id="rename-dialog" class="modal operation-modal">
+      <form id="rename-form" class="modal-card operation-card">
+        <div class="operation-heading"><h3>Rename</h3><button type="button" class="operation-close" data-close-dialog aria-label="Close">×</button></div>
+        <div class="operation-item"><span>Item</span><strong id="rename-source-path"></strong></div>
+        <label>New name<input id="rename-name-input" name="name" maxlength="255" autocomplete="off" required></label>
+        <p class="operation-hint">Existing paths are never overwritten.</p>
+        <div id="rename-error" class="alert" role="alert" hidden></div>
+        <div class="modal-actions"><button type="button" class="ghost compact" data-close-dialog>Cancel</button><button type="submit" class="primary compact-primary">Rename</button></div>
+      </form>
+    </dialog>'''
+copy_dialog=r'''<dialog id="copy-dialog" class="modal operation-modal">
+      <form id="copy-form" class="modal-card operation-card">
+        <div class="operation-heading"><h3>Copy</h3><button type="button" class="operation-close" data-close-dialog aria-label="Close">×</button></div>
+        <div class="operation-item"><span>Item</span><strong id="copy-source-path"></strong></div>
+        <label>Destination<span class="destination-field"><span class="destination-icon" aria-hidden="true">▣</span><input id="copy-destination-input" name="destination" maxlength="4096" autocomplete="off" required><button class="destination-browse" type="button" data-destination-browse="copy" title="Choose destination folder" aria-label="Choose destination folder">▱</button></span></label>
+        <label>New name <small>(optional)</small><input id="copy-name-input" name="name" maxlength="255" autocomplete="off"></label>
+        <p class="operation-hint">No overwrite · maximum 256 MB / 5,000 entries.</p>
+        <div id="copy-error" class="alert" role="alert" hidden></div>
+        <div class="modal-actions"><button type="button" class="ghost compact" data-close-dialog>Cancel</button><button type="submit" class="primary compact-primary">Copy</button></div>
+      </form>
+    </dialog>'''
+move_dialog=r'''<dialog id="move-dialog" class="modal operation-modal">
+      <form id="move-form" class="modal-card operation-card">
+        <div class="operation-heading"><h3>Move</h3><button type="button" class="operation-close" data-close-dialog aria-label="Close">×</button></div>
+        <div class="operation-item"><span>Item</span><strong id="move-source-path"></strong></div>
+        <label>Destination<span class="destination-field"><span class="destination-icon" aria-hidden="true">▣</span><input id="move-destination-input" maxlength="4096" autocomplete="off" required><button class="destination-browse" type="button" data-destination-browse="move" title="Choose destination folder" aria-label="Choose destination folder">▱</button></span></label>
+        <p class="operation-hint">No overwrite · Cross-filesystem moves are blocked.</p>
+        <div id="move-error" class="alert" role="alert" hidden></div>
+        <div class="modal-actions"><button type="button" class="ghost compact" data-close-dialog>Cancel</button><button type="submit" class="primary compact-primary">Move</button></div>
+      </form>
+    </dialog>'''
+delete_dialog=r'''<dialog id="delete-dialog" class="modal operation-modal delete-modal">
+      <form id="delete-form" class="modal-card operation-card">
+        <div class="operation-heading"><h3>Delete</h3><button type="button" class="operation-close" data-close-dialog aria-label="Close">×</button></div>
+        <div class="operation-item"><span>Item</span><strong id="delete-source-path"></strong></div>
+        <p class="delete-warning">This permanently deletes the selected item. Folders are removed recursively after guarded validation.</p>
+        <div id="delete-error" class="alert" role="alert" hidden></div>
+        <div class="modal-actions"><button type="button" class="ghost compact" data-close-dialog>Cancel</button><button type="submit" class="danger-button">Delete</button></div>
+      </form>
+    </dialog>'''
+picker_dialog=r'''<dialog id="destination-dialog" class="modal destination-modal">
+      <div class="modal-card destination-card">
+        <div class="operation-heading"><h3>Choose destination</h3><button type="button" class="operation-close" data-close-dialog aria-label="Close">×</button></div>
+        <div class="destination-nav"><button id="destination-up-button" class="command-icon" type="button">↑</button><code id="destination-current-path">/</code></div>
+    

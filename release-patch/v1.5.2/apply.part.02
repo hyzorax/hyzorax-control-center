@@ -1,0 +1,84 @@
+
+async function loadDestinationPicker(path) {
+clearError("#destination-error");
+try {
+const data = await request(`api/v1/files?path=${encodeURIComponent(path)}`);
+state.destinationPickerPath = data.path; $("#destination-current-path").textContent = data.path; $("#destination-up-button").disabled = data.path === "/";
+const list = $("#destination-directory-list"); list.replaceChildren();
+const directories = (Array.isArray(data.entries) ? data.entries : []).filter((entry) => entry.kind === "directory");
+if (!directories.length) { const empty=document.createElement("p"); empty.className="destination-empty"; empty.textContent="No folders here."; list.append(empty); return; }
+directories.forEach((entry) => { const button=document.createElement("button"); button.type="button"; button.className="destination-row"; button.innerHTML='<span aria-hidden="true">▣</span>'; const label=document.createElement("span"); label.textContent=entry.name; button.append(label); button.addEventListener("click",()=>loadDestinationPicker(entry.path)); list.append(button); });
+} catch (error) { showError("#destination-error", error.message); }
+}
+'''
+if marker not in js: raise SystemExit('array marker missing')
+js=js.replace(marker,extra+marker,1)
+# copy submit blank name fallback; move fixed name
+js=js.replace('name: $("#copy-name-input").value })', 'name: $("#copy-name-input").value.trim() || state.copyName })',1)
+js=js.replace('name: $("#move-name-input").value })', 'name: state.moveName })',1)
+# add delete form handler before close-dialog listener
+marker='document.querySelectorAll("[data-close-dialog]").forEach((button) => {'
+delete_handler=r'''$("#delete-form").addEventListener("submit", async (event) => {
+event.preventDefault(); clearError("#delete-error"); const form=event.currentTarget; setBusy(form,true);
+try { await request("api/v1/files/delete", { method: "POST", body: JSON.stringify({ path: state.deletePath }) }); closeDialog($("#delete-dialog")); await loadFiles(state.currentPath); }
+catch (error) { showError("#delete-error", error.message); }
+finally { setBusy(form,false); }
+});
+document.querySelectorAll("[data-destination-browse]").forEach((button) => button.addEventListener("click", () => openDestinationPicker(button.dataset.destinationBrowse)));
+$("#destination-up-button").addEventListener("click", () => { if (state.destinationPickerPath === "/") return; const parts=state.destinationPickerPath.split("/").filter(Boolean); parts.pop(); loadDestinationPicker(`/${parts.join("/")}`); });
+$("#destination-select-button").addEventListener("click", () => { const input=state.destinationMode === "copy" ? $("#copy-destination-input") : $("#move-destination-input"); if (input) input.value=state.destinationPickerPath; closeDialog($("#destination-dialog")); input?.focus(); });
+'''
+if marker not in js: raise SystemExit('close listener marker missing')
+js=js.replace(marker,delete_handler+marker,1)
+# command bar listeners
+old='''$("#file-path-form").addEventListener("submit", (event) => {\nevent.preventDefault();\nloadFiles($("#file-path-input").value.trim());\n});'''
+new='''$("#file-path-form").addEventListener("submit", (event) => {\nevent.preventDefault();\nloadFiles($("#file-path-input").value.trim());\n$("#file-path-form").hidden = true;\n});\n$("#file-path-button").addEventListener("click", () => { $("#file-path-form").hidden = false; $("#file-path-input").focus(); $("#file-path-input").select(); });\n$("#file-path-close").addEventListener("click", () => { $("#file-path-form").hidden = true; });\n$("#file-refresh-button").addEventListener("click", () => loadFiles(state.currentPath));'''
+if old not in js: raise SystemExit('path form marker missing')
+js=js.replace(old,new,1)
+jsf.write_text(js)
+
+# ---------- CSS ----------
+css=cssf.read_text()
+css += r'''
+
+/* V1.5.2 compact File Manager + guarded delete */
+#files-view.content { padding-top: 1rem; }
+.files-heading { display: none !important; }
+.file-command-bar { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin:.2rem 0 .75rem; }
+.file-location-bar { min-width:0; display:flex; align-items:center; gap:.45rem; }
+.compact-breadcrumbs { min-height:42px; max-width:min(70vw,760px); margin:0; padding:.35rem .55rem; border:1px solid var(--line-strong); border-radius:10px; background:rgba(255,255,255,.9); }
+.command-icon { width:40px; height:40px; flex:0 0 auto; display:grid; place-items:center; border:1px solid var(--line-strong); border-radius:10px; color:var(--blue-deep); background:rgba(255,255,255,.9); font-size:1rem; font-weight:850; }
+.command-icon:hover { background:rgba(99,204,248,.13); border-color:rgba(48,129,234,.42); }
+.file-command-actions { display:flex; align-items:center; gap:.45rem; }
+.compact-tool { height:40px; padding:.45rem .7rem; white-space:nowrap; }
+.file-path-popover { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:.65rem; margin:-.25rem 0 .75rem; padding:.75rem; border:1px solid var(--line); border-radius:12px; background:#fff; box-shadow:0 12px 34px rgba(40,86,145,.10); }
+.file-path-popover[hidden] { display:none !important; }
+.file-path-popover > div { display:flex; gap:.4rem; }
+.file-table-wrap { max-height:calc(100vh - 235px); }
+.file-table { min-width:780px; }
+.file-table th:last-child,.file-table td:last-child { width:62px; }
+.action-menu-trigger { width:36px !important; height:36px !important; padding:0 !important; font-size:20px !important; line-height:1 !important; border-radius:9px !important; }
+.file-action-menu { width:178px !important; min-width:178px !important; padding:6px !important; gap:0 !important; border-radius:10px !important; }
+.file-action-menu button,.file-action-menu a { min-height:34px !important; padding:7px 9px !important; gap:9px !important; border:0 !important; border-radius:7px !important; font-size:12px !important; line-height:1.2 !important; font-weight:750 !important; justify-content:flex-start !important; }
+.action-menu-icon { width:17px; flex:0 0 17px; display:inline-grid; place-items:center; color:#153b68; font-size:15px; font-weight:800; }
+.file-action-separator { height:1px; margin:5px 4px; background:var(--line); }
+.file-action-menu .delete-link { color:#e33d45 !important; }
+.file-action-menu .delete-link .action-menu-icon { color:#e33d45; }
+.file-action-menu .delete-link:hover { background:rgba(227,61,69,.08) !important; color:#c92530 !important; }
+.operation-modal { width:min(94vw,420px) !important; }
+.operation-card { gap:10px !important; padding:16px !important; }
+.operation-heading { align-items:center !important; }
+.operation-heading h3 { margin:0 !important; font-size:18px !important; letter-spacing:-.02em; }
+.operation-close { width:30px !important; height:30px !important; }
+.operation-item { display:grid; gap:3px; padding:0 2px; }
+.operation-item span { color:#37587f; font-size:11px; font-weight:800; }
+.operation-item strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-size:12px; font-weight:600; }
+.operation-card label { font-size:12px; gap:5px; }
+.operation-card label small { color:var(--muted); font-weight:600; }
+.operation-card input { height:42px; padding:8px 10px; border-radius:9px; }
+.destination-field { position:relative; display:grid; grid-template-columns:34px minmax(0,1fr) 36px; align-items:center; border:1px solid var(--line-strong); border-radius:9px; background:#fbfdff; overflow:hidden; }
+.destination-field:focus-within { border-color:var(--blue); box-shadow:0 0 0 3px rgba(99,204,248,.18); background:#fff; }
+.destination-field input { height:40px; padding:7px 8px; border:0 !important; border-radius:0 !important; box-shadow:none !important; background:transparent !important; }
+.destination-icon { display:grid; place-items:center; color:var(--blue-deep); }
+.destination-browse { height:40px; border-left:1px solid var(--line); color:#31577f; background:transparent; font-size:17px; }
+.destination-browse:hover { background:rgba(99,204,

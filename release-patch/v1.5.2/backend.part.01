@@ -1,0 +1,217 @@
+ourceAt(parentFD, name)
++	if operationError != nil {
++		return operationError
++	}
++	if uint64(source.Stat.Dev) != allowedDev {
++		return &Error{Code: "mount_boundary_denied", Message: "delete source contains a mount-boundary path"}
++	}
++	if reserveError := budget.reserve(); reserveError != nil {
++		return reserveError
++	}
++	if source.Kind == "file" {
++		return nil
++	}
++	fd, err := unix.Openat2(parentFD, name, &unix.OpenHow{
++		Flags:   uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW),
++		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS,
++	})
++	if err != nil {
++		return filesystemError(err, "delete source directory could not be opened")
++	}
++	directory := os.NewFile(uintptr(fd), name)
++	defer directory.Close()
++	for {
++		entries, readError := directory.ReadDir(128)
++		for _, entry := range entries {
++			if operationError := filesystemDeletePreflightAt(ctx, int(directory.Fd()), entry.Name(), allowedDev, budget); operationError != nil {
++				return operationError
++			}
++		}
++		if errors.Is(readError, io.EOF) {
++			break
++		}
++		if readError != nil {
++			return filesystemError(readError, "delete source directory could not be read")
++		}
++	}
++	return nil
++}
++
++func filesystemDeleteTempName() (string, error) {
++	buffer := make([]byte, 8)
++	if _, err := rand.Read(buffer); err != nil {
++		return "", err
++	}
++	return ".hyzorax-delete-" + hex.EncodeToString(buffer) + ".tmp", nil
++}
++
++func removeFilesystemDeleteTreeAt(parentFD int, name string, allowedDev uint64) error {
++	var stat unix.Stat_t
++	if err := unix.Fstatat(parentFD, name, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
++		return err
++	}
++	if uint64(stat.Dev) != allowedDev {
++		return unix.EXDEV
++	}
++	switch stat.Mode & unix.S_IFMT {
++	case unix.S_IFREG:
++		return unix.Unlinkat(parentFD, name, 0)
++	case unix.S_IFDIR:
++		fd, err := unix.Openat2(parentFD, name, &unix.OpenHow{
++			Flags:   uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW),
++			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS,
++		})
++		if err != nil {
++			return err
++		}
++		directory := os.NewFile(uintptr(fd), name)
++		for {
++			entries, readError := directory.ReadDir(128)
++			for _, entry := range entries {
++				if err := removeFilesystemDeleteTreeAt(int(directory.Fd()), entry.Name(), allowedDev); err != nil {
++					directory.Close()
++					return err
++				}
++			}
++			if errors.Is(readError, io.EOF) {
++				break
++			}
++			if readError != nil {
++				directory.Close()
++				return readError
++			}
++		}
++		if err := directory.Close(); err != nil {
++			return err
++		}
++		return unix.Unlinkat(parentFD, name, unix.AT_REMOVEDIR)
++	case unix.S_IFLNK:
++		return unix.ELOOP
++	default:
++		return unix.EPERM
++	}
++}
++
+ type filesystemCopySource struct {
+ 	Info os.FileInfo
+ 	Stat *syscall.Stat_t
+diff -ruN '--exclude=app.js' '--exclude=app.css' '--exclude=index.html' a/internal/helper/filesystem_linux_test.go b/internal/helper/filesystem_linux_test.go
+--- a/internal/helper/filesystem_linux_test.go	2026-08-18 21:19:52.000000000 +0000
++++ b/internal/helper/filesystem_linux_test.go	2026-08-19 00:03:16.421016735 +0000
+@@ -674,3 +674,84 @@
+ 		t.Fatalf("special-file copy was not rejected: %+v", operationError)
+ 	}
+ }
++
++func TestGuardedFilesystemDeleteFileAndDirectory(t *testing.T) {
++	root := t.TempDir()
++	filePath := filepath.Join(root, "remove.txt")
++	if err := os.WriteFile(filePath, []byte("delete-safe\n"), 0o640); err != nil {
++		t.Fatal(err)
++	}
++	deleted, operationError := filesystemDelete(context.Background(), filePath)
++	if operationError != nil {
++		t.Fatalf("delete file failed: %+v", operationError)
++	}
++	if deleted["path"] != filePath || deleted["kind"] != "file" {
++		t.Fatalf("unexpected delete file response: %#v", deleted)
++	}
++	if _, err := os.Lstat(filePath); !errors.Is(err, os.ErrNotExist) {
++		t.Fatalf("deleted file still exists: %v", err)
++	}
++
++	directoryPath := filepath.Join(root, "tree")
++	if err := os.MkdirAll(filepath.Join(directoryPath, "nested"), 0o750); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(filepath.Join(directoryPath, "nested", "config.ini"), []byte("enabled=true\n"), 0o640); err != nil {
++		t.Fatal(err)
++	}
++	deleted, operationError = filesystemDelete(context.Background(), directoryPath)
++	if operationError != nil {
++		t.Fatalf("delete directory failed: %+v", operationError)
++	}
++	if deleted["kind"] != "directory" {
++		t.Fatalf("unexpected delete directory response: %#v", deleted)
++	}
++	if entries, ok := deleted["entries"].(int); !ok || entries != 3 {
++		t.Fatalf("unexpected deleted entry count: %#v", deleted["entries"])
++	}
++	if _, err := os.Lstat(directoryPath); !errors.Is(err, os.ErrNotExist) {
++		t.Fatalf("deleted directory still exists: %v", err)
++	}
++}
++
++func TestGuardedFilesystemDeleteRejectsUnsafeTargets(t *testing.T) {
++	root := t.TempDir()
++	linkTarget := filepath.Join(root, "target.txt")
++	if err := os.WriteFile(linkTarget, []byte("keep\n"), 0o640); err != nil {
++		t.Fatal(err)
++	}
++	linkPath := filepath.Join(root, "link.txt")
++	if err := os.Symlink(linkTarget, linkPath); err != nil {
++		t.Fatal(err)
++	}
++	if _, operationError := filesystemDelete(context.Background(), linkPath); operationError == nil || operationError.Code != "symlink_denied" {
++		t.Fatalf("symlink delete was not rejected: %+v", operationError)
++	}
++	if contents, err := os.ReadFile(linkTarget); err != nil || string(contents) != "keep\n" {
++		t.Fatalf("symlink target changed: %q err=%v", contents, err)
++	}
++
++	fifoPath := filepath.Join(root, "pipe")
++	if err := unix.Mkfifo(fifoPath, 0o600); err != nil {
++		t.Fatal(err)
++	}
++	if _, operationError := filesystemDelete(context.Background(), fifoPath); operationError == nil || operationError.Code != "unsupported_file_type" {
++		t.Fatalf("special-file delete was not rejected: %+v", operationError)
++	}
++
++	if _, operationError := filesystemDelete(context.Background(), "/"); operationError == nil || operationError.Code != "root_path_denied" {
++		t.Fatalf("root delete was not rejected: %+v", operationError)
++	}
++	if _, operationError := filesystemDelete(context.Background(), "/opt/hyzorax-control"); operationError == nil || operationError.Code != "protected_path_denied" {
++		t.Fatalf("protected HYZoraX path delete was not rejected: %+v", operationError)
++	}
++}
++
++func TestFilesystemListMarksProtectedPathsNotDeletable(t *testing.T) {
++	if !isProtectedFilesystemDeletePath("/opt/hyzorax-control") {
++		t.Fatal("HYZoraX control root must remain protected from delete")
++	}
++	if isProtectedFilesystemDeletePath("/opt/hyzorax-control/example.txt") {
++		t.Fatal("ordinary child paths should not be globally protected")
++	}
++}
+diff -ruN '--exclude=app.js' '--exclude=app.css' '--exclude=index.html' a/internal/helper/protocol.go b/internal/helper/protocol.go
+--- a/internal/helper/protocol.go	2026-08-18 21:19:15.000000000 +0000
++++ b/internal/helper/protocol.go	2026-08-19 00:02:55.450838972 +0000
+@@ -2,7 +2,7 @@
+ 
+ import "encoding/json"
+ 
+-const ProtocolVersion = 7
++const ProtocolVersion = 8
+ 
+ type Request struct {
+ 	Version       int             `json:"version"`
+diff -ruN '--exclude=app.js' '--exclude=app.css' '--exclude=index.html' a/internal/helper/server_linux.go b/internal/helper/server_linux.go
+--- a/internal/helper/server_linux.go	2026-08-18 21:19:15.000000000 +0000
++++ b/internal/helper/server_linux.go	2026-08-19 00:02:55.451369710 +0000
+@@ -95,7 +95,11 @@
+ 		response.Error = &Error{Code: "invalid_envelope", Message: "required request identity fields are missing"}
+ 		return response
+ 	}
+-	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
++	timeout := 15 * time.Second
++	if request.Action == "filesystem.delete" {
++		timeout = 60 * time.Second
++	}
++	ctx, cancel := context.WithTimeout(parent, timeout)
+ 	defer cancel()
+ 	switch request.Action {
+ 	case "helper.ping":
+@@ -212,6 +216,15 @@
+ 		if operationError != nil {
+ 			response.Error = operationError
+ 			return response
