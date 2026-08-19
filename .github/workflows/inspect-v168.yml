@@ -1,0 +1,40 @@
+name: Inspect V1.6.7 UI for V1.6.8
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.event.pull_request.head.ref == 'agent/v1.6.8-services-ui'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download V1.6.7 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.6.7 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+      - name: Print UI and API markers
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          echo '===== APPLICATIONS SIDEBAR ====='
+          grep -n -B8 -A12 'Applications' internal/web/static/index.html || true
+          echo '===== SIDEBAR / VIEW MARKERS ====='
+          grep -n -E 'data-view|view-panel|nav-item|sidebar' internal/web/static/index.html | head -n 160 || true
+          echo '===== PLACEHOLDER / SOON ====='
+          grep -n -B5 -A10 -E 'SOON|Soon|soon' internal/web/static/index.html | head -n 160 || true
+          echo '===== JS VIEW SWITCHING ====='
+          grep -n -B5 -A20 -E 'data-view|switchView|showView|setView|view-' internal/web/static/app.js | head -n 240 || true
+          echo '===== HELPER CLIENT / FILE CALL PATTERN ====='
+          grep -Rni -B4 -A12 -E 'callFilesystemHelperWithParams|helper.*Call|helperClient|callHelper' internal/httpapi | head -n 240 || true
+          echo '===== APP ROUTES ====='
+          grep -n -B2 -A2 'mux.Handle' internal/httpapi/app.go | head -n 240 || true
