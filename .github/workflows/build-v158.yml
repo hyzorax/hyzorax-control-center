@@ -57,8 +57,12 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           text=Path('packaging/hz').read_text()
+          marker='if run_action "${1:-menu}"; then exit 0; fi'
+          if marker not in text:
+              raise SystemExit('main hz menu boundary not found')
+          tail=text.split(marker,1)[1]
           labels=[]
-          for line in text.splitlines():
+          for line in tail.splitlines():
               line=line.strip()
               if line.startswith('echo "') and ') ' in line:
                   value=line[len('echo "'):-1] if line.endswith('"') else line
@@ -71,7 +75,7 @@ jobs:
               '9) Change panel port','10) Update Control Panel','0) Exit'
           ]
           if labels != expected:
-              raise SystemExit(f'hz menu changed unexpectedly: {labels!r}')
+              raise SystemExit(f'hz main menu changed unexpectedly: {labels!r}')
           PY
 
       - name: Test and vet
