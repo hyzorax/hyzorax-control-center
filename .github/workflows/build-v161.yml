@@ -34,10 +34,11 @@ jobs:
       - name: Apply V1.6.1
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.6.1/prepare.py release-patch/v1.6.1/apply.py release-patch/v1.6.1/harden.py
+          python3 -m py_compile release-patch/v1.6.1/prepare.py release-patch/v1.6.1/apply.py release-patch/v1.6.1/harden.py release-patch/v1.6.1/acceptance.py
           python3 release-patch/v1.6.1/prepare.py work/hyzorax-control
           python3 release-patch/v1.6.1/apply.py work/hyzorax-control
           python3 release-patch/v1.6.1/harden.py work/hyzorax-control
+          python3 release-patch/v1.6.1/acceptance.py work/hyzorax-control
           cd work/hyzorax-control
           gofmt -w internal/installer/*.go internal/helper/*.go internal/web/assets_test.go internal/httpapi/app_test.go
       - name: Static and security checks
@@ -72,20 +73,26 @@ jobs:
           set -Eeuo pipefail
           cd work/hyzorax-control
           if dpkg-query -W -f='${Status}' nginx 2>/dev/null | grep -q 'install ok installed'; then
-            echo 'Hosted runner unexpectedly already has Nginx installed; refusing to mask preflight behavior.' >&2
-            exit 1
+            echo 'Runner has preinstalled Nginx; first verify HYZoraX refuses to overwrite it.'
+            sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestNginxInstallerRejectsExistingInstallation$' -count=1 -v
+            sudo systemctl disable --now nginx 2>/dev/null || true
+            sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get -o DPkg::Lock::Timeout=120 -y purge nginx nginx-common nginx-core
           fi
           if [[ -e /etc/nginx ]]; then
-            echo 'Hosted runner unexpectedly has /etc/nginx; refusing destructive cleanup.' >&2
+            echo 'Disposable runner still has /etc/nginx after package purge; refusing manual deletion.' >&2
             exit 1
           fi
           if ss -H -ltn 'sport = :80' | grep -q .; then
-            echo 'Hosted runner TCP/80 is occupied; Nginx installer correctly requires a clean port.' >&2
+            echo 'Disposable runner TCP/80 remains occupied; refusing to reclaim it.' >&2
             exit 1
           fi
           sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestNginxInstallerAcceptance$' -count=1 -v
           if dpkg-query -W -f='${Status}' nginx 2>/dev/null | grep -q 'install ok installed'; then
             echo 'Nginx remained installed after acceptance rollback.' >&2
+            exit 1
+          fi
+          if dpkg-query -W -f='${Status}' nginx-core 2>/dev/null | grep -q 'install ok installed'; then
+            echo 'nginx-core remained installed after acceptance rollback.' >&2
             exit 1
           fi
           if systemctl is-active --quiet nginx 2>/dev/null; then
@@ -119,5 +126,5 @@ jobs:
             HYZoraX_Control_Center_Linux_x86_64.tar.gz \
             HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
             --title 'HYZoraX Control Panel V1.6.1' \
-            --notes 'First real core-installer acceptance on the V1.6.0 engine. Adds the built-in Ubuntu 24.04 Nginx manifest plus fixed privileged helper actions for Nginx preflight, install, health verification and rollback. The clean-install path refuses existing Nginx/config and occupied TCP/80, never reclaims a port, and does not change firewall policy. GitHub Actions validates a real Nginx apt install, nginx -t, active service, localhost HTTP response, then rollback/purge on an isolated Ubuntu 24.04 runner. Helper protocol V11. No new hz menu entry and no browser Installer UI is exposed yet.' \
+            --notes 'First real core-installer acceptance on the V1.6.0 engine. Adds the built-in Ubuntu 24.04 Nginx manifest plus fixed privileged helper actions for Nginx preflight, install, health verification and rollback. Existing Nginx is explicitly refused before any clean-install acceptance. The clean-install path refuses existing config and occupied TCP/80, never reclaims a port, and does not change firewall policy. GitHub Actions then uses its disposable runner to validate a real Nginx apt install, nginx -t, active service, localhost HTTP response, and rollback/purge. Helper protocol V11. No new hz menu entry and no browser Installer UI is exposed yet.' \
             --latest
