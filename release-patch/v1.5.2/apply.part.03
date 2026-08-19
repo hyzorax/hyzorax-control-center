@@ -1,0 +1,51 @@
+248,.12); color:var(--blue-deep); }
+.operation-hint { margin:0 !important; font-size:11px !important; }
+.operation-card .modal-actions { margin-top:4px; }
+.operation-card .modal-actions .primary,.danger-button { min-width:96px; height:40px; padding:0 16px; border-radius:9px; font-weight:850; }
+.danger-button { color:#fff; background:#e33d45; box-shadow:0 10px 24px rgba(227,61,69,.18); }
+.danger-button:hover { background:#cc2f38; }
+.delete-warning { margin:0 !important; padding:10px 11px; border:1px solid rgba(227,61,69,.18); border-radius:9px; color:#a6323b; background:rgba(227,61,69,.055); font-size:11px; line-height:1.45; }
+.destination-modal { width:min(94vw,430px); }
+.destination-card { gap:10px; padding:16px; }
+.destination-nav { display:flex; align-items:center; gap:8px; }
+.destination-nav code { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:10px; border:1px solid var(--line); border-radius:9px; background:#f7faff; }
+.destination-directory-list { min-height:120px; max-height:300px; overflow:auto; display:grid; align-content:start; gap:4px; padding:4px; border:1px solid var(--line); border-radius:10px; background:#fbfdff; }
+.destination-row { display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:8px; color:#244b78; background:transparent; text-align:left; font-size:12px; font-weight:750; }
+.destination-row:hover { background:rgba(99,204,248,.13); color:var(--blue-deep); }
+.destination-empty { margin:auto; color:var(--muted); font-size:12px; }
+@media(max-width:800px){.file-command-bar{align-items:stretch;flex-direction:column}.compact-breadcrumbs{max-width:none;flex:1}.file-command-actions{flex-wrap:wrap}.file-table-wrap{max-height:calc(100vh - 300px)}}
+@media(max-width:680px){.file-action-menu{left:10px!important;right:10px!important;bottom:10px!important;top:auto!important;width:auto!important;min-width:0!important;grid-template-columns:1fr!important;padding:8px!important}.file-action-menu button,.file-action-menu a{min-height:42px!important;font-size:13px!important}.operation-modal,.destination-modal{width:calc(100vw - 20px)!important;margin:auto!important;border-radius:16px!important}.operation-card,.destination-card{border-radius:16px!important}.file-command-actions .compact-tool{flex:1}.file-path-popover{grid-template-columns:1fr}.file-path-popover>div{justify-content:flex-end}}
+'''
+cssf.write_text(css)
+
+# ---------- regression tests ----------
+for p in (assets_test,app_test):
+    t=p.read_text().replace('Version 1.5.1','Version 1.5.2')
+    p.write_text(t)
+# replace old operation UI tests with V1.5.2-specific assertions while preserving other tests
+at=assets_test.read_text()
+start=at.index('func TestFileManagerIncludesGuardedRenameUI')
+replacement=r'''func TestFileManagerIncludesCompactGuardedOperationsUI(t *testing.T) {
+	htmlBytes, err := Assets.ReadFile("static/index.html")
+	if err != nil { t.Fatal(err) }
+	javascriptBytes, err := Assets.ReadFile("static/app.js")
+	if err != nil { t.Fatal(err) }
+	cssBytes, err := Assets.ReadFile("static/app.css")
+	if err != nil { t.Fatal(err) }
+	html, javascript, css := string(htmlBytes), string(javascriptBytes), string(cssBytes)
+	for _, fragment := range []string{`id="rename-dialog"`, `id="copy-dialog"`, `id="move-dialog"`, `id="delete-dialog"`, `id="destination-dialog"`, `New name <small>(optional)</small>`, `Cross-filesystem moves are blocked.`, `Existing paths are never overwritten.`} {
+		if !strings.Contains(html, fragment) { t.Fatalf("compact file operation UI is missing %q", fragment) }
+	}
+	if strings.Contains(html, "Browse, rename, copy, move, upload and edit guarded server files without exposing a browser terminal.") { t.Fatal("removed File Manager description is still present") }
+	for _, fragment := range []string{`entry.deletable`, `openDelete(entry)`, `api/v1/files/delete`, `fileActionIcons`, `data-destination-browse`, `file-path-button`} {
+		if !strings.Contains(javascript, fragment) { t.Fatalf("file operation behavior is missing %q", fragment) }
+	}
+	for _, fragment := range []string{`.file-command-bar`, `.file-action-menu`, `width:178px`, `.danger-button`, `.destination-field`} {
+		if !strings.Contains(css, fragment) { t.Fatalf("compact file manager styling is missing %q", fragment) }
+	}
+}
+'''
+at=at[:start]+replacement+'\n'
+assets_test.write_text(at)
+
+print('Applied HYZoraX Control Panel V1.5.2 compact File Manager + guarded delete')
