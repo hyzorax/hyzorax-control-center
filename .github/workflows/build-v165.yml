@@ -1,0 +1,126 @@
+name: Build and release V1.6.5 Node.js 24 Installer
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build-v165:
+    if: github.event.pull_request.head.ref == 'agent/v1.6.5-node24-installer'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Download V1.6.4 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.6.4 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+          sha256sum work/hyzorax-control/packaging/hz | awk '{print $1}' > /tmp/hz-before.sha
+          grep -q 'const ProtocolVersion = 14' work/hyzorax-control/internal/helper/protocol.go
+      - name: Apply V1.6.5
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.6.5/apply.py release-patch/v1.6.5/fix_scope.py
+          python3 release-patch/v1.6.5/apply.py work/hyzorax-control
+          python3 release-patch/v1.6.5/fix_scope.py work/hyzorax-control
+          cd work/hyzorax-control
+          gofmt -w internal/installer/*.go internal/helper/*.go internal/web/assets_test.go internal/httpapi/app_test.go
+      - name: Static and security checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hz
+          test "$(sha256sum packaging/hz | awk '{print $1}')" = "$(cat /tmp/hz-before.sha)"
+          grep -q 'Version 1.6.5' internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 15' internal/helper/protocol.go
+          grep -q 'func Node24Manifest' internal/installer/builtin.go
+          grep -q '24.19.0' internal/helper/installer_node24_linux.go
+          grep -q '14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647' internal/helper/installer_node24_linux.go
+          grep -q 'https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.xz' internal/helper/installer_node24_linux.go
+          grep -q 'installer.node24.preflight' internal/helper/server_linux.go
+          grep -q 'installer.node24.install' internal/helper/server_linux.go
+          grep -q 'installer.node24.health' internal/helper/server_linux.go
+          grep -q 'installer.node24.rollback' internal/helper/server_linux.go
+          if grep -Rni --include='installer_node24_linux.go' -E 'request\.Params.*(url|command|package|path)|/bin/sh|bash -c|exec\.CommandContext\(ctx, executable' internal/helper; then
+            echo 'Node.js installer appears to accept dynamic privileged execution' >&2
+            exit 1
+          fi
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+      - name: Real Ubuntu 24.04 Node.js acceptance
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          conflicts=()
+          for path in /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack; do
+            [[ -e "$path" || -L "$path" ]] && conflicts+=("$path")
+          done
+          if [[ -d /opt/hyzorax/node-v24.19.0 || -f /var/lib/hyzorax-control/installer-managed/node24 ]]; then
+            sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestNode24InstallerRejectsExistingManagedPath$' -count=1 -v
+            sudo rm -rf /opt/hyzorax/node-v24.19.0 /opt/hyzorax/node-v24.19.0-linux-x64
+            sudo rm -f /var/lib/hyzorax-control/installer-managed/node24
+          fi
+          if (( ${#conflicts[@]} > 0 )); then
+            mkdir -p /tmp/hyzorax-node-command-backup
+            for path in "${conflicts[@]}"; do sudo mv "$path" "/tmp/hyzorax-node-command-backup/$(basename "$path")"; done
+          fi
+          restore_runner_links() {
+            for path in /tmp/hyzorax-node-command-backup/*; do
+              [[ -e "$path" || -L "$path" ]] || continue
+              sudo mv "$path" "/usr/local/bin/$(basename "$path")" || true
+            done
+          }
+          trap restore_runner_links EXIT
+          sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestNode24InstallerAcceptance$' -count=1 -v
+          [[ ! -e /opt/hyzorax/node-v24.19.0 ]]
+          [[ ! -e /var/lib/hyzorax-control/installer-managed/node24 ]]
+          for path in /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack; do [[ ! -e "$path" && ! -L "$path" ]]; done
+      - name: Build and verify V1.6.5
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.6.5
+          ./build/hyzorax-control -version | grep -q '1.6.5'
+          ./build/hyzorax-control-helper -version | grep -q '1.6.5'
+          grep -q 'const ProtocolVersion = 15' internal/helper/protocol.go
+          test "$(sha256sum build/hz | awk '{print $1}')" = "$(cat /tmp/hz-before.sha)"
+          (cd build && sha256sum -c SHA256SUMS)
+      - name: Package release assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+      - name: Publish V1.6.5 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.6.5 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.6.5 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.6.5' \
+            --notes 'Node.js 24 LTS clean-install acceptance using the official Node.js v24.19.0 Linux x64 archive with pinned SHA256 14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647. Runtime is HYZoraX-owned under /opt/hyzorax/node-v24.19.0 with /usr/local command symlinks; /usr/bin/node and distro packages are not modified. Existing HYZoraX runtime or command-path conflicts are refused. Real archive download/checksum/install/version/npm/rollback acceptance runs on disposable Ubuntu 24.04. Helper protocol V15. No new hz menu entry and no browser Installer UI is exposed yet.' \
+            --latest
