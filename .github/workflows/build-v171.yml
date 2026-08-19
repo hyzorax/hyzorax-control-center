@@ -38,8 +38,9 @@ jobs:
       - name: Apply V1.7.1
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.7.1/ssh_security.py release-patch/v1.7.1/fix_acceptance.py
+          python3 -m py_compile release-patch/v1.7.1/ssh_security.py release-patch/v1.7.1/fix_root_equivalence.py release-patch/v1.7.1/fix_acceptance.py
           python3 release-patch/v1.7.1/ssh_security.py work/hyzorax-control
+          python3 release-patch/v1.7.1/fix_root_equivalence.py work/hyzorax-control
           python3 release-patch/v1.7.1/fix_acceptance.py work/hyzorax-control
           cd work/hyzorax-control
           gofmt -w internal/helper/protocol.go internal/helper/server_linux.go internal/helper/security_linux.go internal/helper/security_linux_test.go internal/helper/security_ssh_acceptance_test.go internal/httpapi/app.go internal/httpapi/security.go internal/httpapi/app_test.go internal/web/assets_test.go
@@ -58,6 +59,7 @@ jobs:
           grep -q 'DisallowUnknownFields' internal/helper/security_linux.go
           grep -q 'ssh_lockout_risk' internal/helper/security_linux.go
           grep -q 'root_key_detected' internal/helper/security_linux.go
+          grep -q 'securityRootPolicyEquivalent' internal/helper/security_linux.go
           grep -q '"all_interfaces"' internal/helper/security_linux.go
           grep -q 'POST /api/v1/security/ssh/apply' internal/httpapi/app.go
           grep -q 'Action:[[:space:]]*"security.ssh.apply"' internal/httpapi/security.go
@@ -146,5 +148,5 @@ jobs:
             HYZoraX_Control_Center_Linux_x86_64.tar.gz \
             HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
             --title 'HYZoraX Control Panel V1.7.1' \
-            --notes 'V1.7.1 advances P7 Security Center with guarded SSH controls. Wildcard listeners are now described accurately as All interfaces rather than Public. The oversized read-only intro is replaced by a compact guarded-security header. SSH Management can control root login between Password + keys and Keys only, and enable/disable PasswordAuthentication. Restrictive changes are refused unless a root authorized key is detected and public-key authentication is active. HYZoraX writes only its own /etc/ssh/sshd_config.d/10-hyzorax-security.conf, validates with sshd -t, reloads without stopping active SSH sessions, verifies effective settings, and automatically restores the previous file on validation/reload/override failure. A real Ubuntu 24.04 OpenSSH harden/restore acceptance test is required. Helper protocol V19; hz menu unchanged; Firewall and Fail2ban write controls remain for later P7 slices.' \
+            --notes 'V1.7.1 advances P7 Security Center with guarded SSH controls. Wildcard listeners are now described accurately as All interfaces rather than Public. The oversized read-only intro is replaced by a compact guarded-security header. SSH Management can control root login between Password + keys and Keys only, and enable/disable PasswordAuthentication. Restrictive changes are refused unless a root authorized key is detected and public-key authentication is active. HYZoraX writes only its own /etc/ssh/sshd_config.d/10-hyzorax-security.conf, validates with sshd -t, reloads without stopping active SSH sessions, verifies effective settings including equivalent OpenSSH root-login aliases, and automatically restores the previous file on validation/reload/override failure. A real Ubuntu 24.04 OpenSSH harden/restore acceptance test is required. Helper protocol V19; hz menu unchanged; Firewall and Fail2ban write controls remain for later P7 slices.' \
             --latest
