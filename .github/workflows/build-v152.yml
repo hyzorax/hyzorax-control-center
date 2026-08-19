@@ -1,0 +1,112 @@
+name: Build and release V1.5.2 File Manager
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build-v152:
+    if: github.event.pull_request.head.ref == 'agent/v1.5.2-compact-delete'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+
+      - name: Assemble V1.5.2 patch source
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/v152-patch
+          cat release-patch/v1.5.2/apply.part.* > /tmp/v152-patch/apply.py
+          cat release-patch/v1.5.2/backend.part.* > /tmp/v152-patch/backend.patch
+          python3 -m py_compile /tmp/v152-patch/apply.py
+          test -s /tmp/v152-patch/backend.patch
+
+      - name: Download V1.5.1 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.5.1 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+
+      - name: Apply V1.5.2
+        run: |
+          set -Eeuo pipefail
+          python3 /tmp/v152-patch/apply.py work/hyzorax-control
+          cd work/hyzorax-control
+          gofmt -w internal/helper/protocol.go internal/helper/server_linux.go internal/helper/filesystem_linux.go internal/helper/filesystem_linux_test.go internal/httpapi/app.go internal/httpapi/handlers.go internal/httpapi/files_test.go internal/web/assets_test.go internal/httpapi/app_test.go
+
+      - name: Static and security checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hyzorax-control-tls
+          bash -n packaging/hyzorax-control-updater
+          bash -n packaging/hz
+          grep -q 'Version 1.5.2' internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 8' internal/helper/protocol.go
+          grep -q 'POST /api/v1/files/delete' internal/httpapi/app.go
+          grep -q 'filesystem.delete' internal/helper/server_linux.go
+          grep -q 'protectedFilesystemDeletePaths' internal/helper/filesystem_linux.go
+          grep -q 'maxDeleteEntries' internal/helper/filesystem_linux.go
+          grep -q 'entry.deletable' internal/web/static/app.js
+          grep -q 'delete-link' internal/web/static/app.js
+          grep -q 'id="delete-dialog"' internal/web/static/index.html
+          grep -q 'id="destination-dialog"' internal/web/static/index.html
+          grep -q 'file-command-bar' internal/web/static/index.html
+          grep -q 'width:178px' internal/web/static/app.css
+          if grep -q 'Browse, rename, copy, move, upload and edit guarded server files without exposing a browser terminal.' internal/web/static/index.html; then
+            echo 'Removed File Manager description is still present' >&2
+            exit 1
+          fi
+
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+
+      - name: Build and verify V1.5.2
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.5.2
+          ./build/hyzorax-control -version | grep -q '1.5.2'
+          ./build/hyzorax-control-helper -version | grep -q '1.5.2'
+          (cd build && sha256sum -c SHA256SUMS)
+
+      - name: Package release assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+
+      - name: Publish V1.5.2 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.5.2 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.5.2 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.5.2' \
+            --notes 'File Manager completion update. Removes the oversized duplicate File Manager hero and description, replaces it with a compact breadcrumb/command bar, tightens the anchored actions menu to match the approved layout, adds compact Rename/Copy/Move dialogs with a destination folder picker, and adds guarded permanent Delete for regular files and directories. Delete is auditable, bounded to 5,000 entries, denies root/protected HYZoraX and critical system paths, rejects symlinks/special files/mount boundaries, and uses atomic same-directory staging before recursive removal. Helper protocol V8.' \
+            --latest
