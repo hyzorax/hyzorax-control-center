@@ -1,0 +1,28 @@
+name: Inspect V1.5.7 hz detail output
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-hz:
+    if: github.event.pull_request.head.ref == 'agent/v1.5.8-hz-username'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download V1.5.7 source release and inspect hz
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.5.7 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          echo '===== hz option 1 / username references ====='
+          grep -nE 'Show panel|Panel IP|Panel URL|Username|Password|owner-username|case .*1|^[[:space:]]*1\)' work/hyzorax-control/packaging/hz || true
+          echo '===== hz first 260 lines ====='
+          sed -n '1,260p' work/hyzorax-control/packaging/hz
