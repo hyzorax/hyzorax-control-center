@@ -1,0 +1,135 @@
+     <div id="destination-directory-list" class="destination-directory-list"></div>
+        <div id="destination-error" class="alert" role="alert" hidden></div>
+        <div class="modal-actions"><button type="button" class="ghost compact" data-close-dialog>Cancel</button><button id="destination-select-button" type="button" class="primary compact-primary">Use this folder</button></div>
+      </div>
+    </dialog>'''
+html=sub_once(html,r'<dialog id="rename-dialog" class="modal operation-modal">.*?</dialog>',rename_dialog,'rename dialog')
+html=sub_once(html,r'<dialog id="copy-dialog" class="modal operation-modal">.*?</dialog>',copy_dialog,'copy dialog')
+html=sub_once(html,r'<dialog id="move-dialog" class="modal operation-modal">.*?</dialog>',move_dialog,'move dialog')
+# insert new dialogs before editor
+html=html.replace('    <dialog id="editor-dialog" class="modal wide">',delete_dialog+'\n\n    '+picker_dialog+'\n\n    <dialog id="editor-dialog" class="modal wide">',1)
+index.write_text(html)
+
+# ---------- JS ----------
+js=jsf.read_text()
+# state fields
+js=js.replace('moveName: "",\ndashboardTimer:', 'moveName: "",\ndeletePath: "",\ndeleteName: "",\ndeleteKind: "",\ndestinationMode: "",\ndestinationPickerPath: "/",\ndashboardTimer:',1)
+# replace menu helper block
+menu=r'''function closeFileActionMenus() {
+document.querySelectorAll(".file-action-menu").forEach((menu) => {
+menu.hidden = true;
+menu.style.removeProperty("left");
+menu.style.removeProperty("top");
+menu.style.removeProperty("visibility");
+const trigger = menu.parentElement?.querySelector(".action-menu-trigger");
+if (trigger) trigger.setAttribute("aria-expanded", "false");
+});
+document.body.classList.remove("file-action-menu-open");
+}
+function positionFileActionMenu(trigger, menu) {
+menu.style.removeProperty("left");
+menu.style.removeProperty("top");
+menu.style.removeProperty("visibility");
+if (window.matchMedia("(max-width: 680px)").matches) {
+document.body.classList.add("file-action-menu-open");
+return;
+}
+const padding = 8;
+menu.style.visibility = "hidden";
+const triggerRect = trigger.getBoundingClientRect();
+const menuRect = menu.getBoundingClientRect();
+let left = triggerRect.right - menuRect.width;
+left = Math.max(padding, Math.min(left, window.innerWidth - menuRect.width - padding));
+let top = triggerRect.bottom + 5;
+if (top + menuRect.height > window.innerHeight - padding) top = Math.max(padding, triggerRect.top - menuRect.height - 5);
+menu.style.left = `${left}px`;
+menu.style.top = `${top}px`;
+menu.style.visibility = "";
+}
+const fileActionIcons = { open: "▣", download: "⇩", edit: "✎", rename: "↶", copy: "⧉", move: "↔", delete: "⌫" };
+function appendFileAction(menu, action, label, handler, className = "") {
+const button = document.createElement("button");
+button.type = "button";
+button.dataset.action = action;
+button.setAttribute("role", "menuitem");
+if (className) button.className = className;
+const icon = document.createElement("span");
+icon.className = "action-menu-icon";
+icon.setAttribute("aria-hidden", "true");
+icon.textContent = fileActionIcons[action] || "•";
+const text = document.createElement("span");
+text.textContent = label;
+button.append(icon, text);
+button.addEventListener("click", handler);
+menu.append(button);
+}
+function appendFileActionSeparator(menu) {
+const separator = document.createElement("div");
+separator.className = "file-action-separator";
+separator.setAttribute("role", "separator");
+menu.append(separator);
+}
+function buildFileActionMenu(entry) {
+const group = document.createElement("div");
+group.className = "file-actions";
+const menu = document.createElement("div");
+menu.className = "file-action-menu";
+menu.setAttribute("role", "menu");
+menu.setAttribute("aria-label", `Actions for ${entry.name}`);
+menu.hidden = true;
+let primaryCount = 0;
+if (entry.kind === "directory") { appendFileAction(menu, "open", "Open", () => loadFiles(entry.path)); primaryCount += 1; }
+if (entry.downloadable) {
+const download = document.createElement("a");
+download.className = "download-link";
+download.href = `api/v1/files/download?path=${encodeURIComponent(entry.path)}`;
+download.dataset.action = "download";
+download.setAttribute("role", "menuitem");
+const icon = document.createElement("span"); icon.className = "action-menu-icon"; icon.setAttribute("aria-hidden", "true"); icon.textContent = fileActionIcons.download;
+const text = document.createElement("span"); text.textContent = "Download";
+download.append(icon, text); menu.append(download); primaryCount += 1;
+}
+if (entry.editable) { appendFileAction(menu, "edit", "Edit", () => openEditor(entry.path), "edit-link"); primaryCount += 1; }
+const mutationCount = Number(Boolean(entry.renamable)) + Number(Boolean(entry.copyable)) + Number(Boolean(entry.movable));
+if (primaryCount && mutationCount) appendFileActionSeparator(menu);
+if (entry.renamable) appendFileAction(menu, "rename", "Rename", () => openRename(entry), "rename-link");
+if (entry.copyable) appendFileAction(menu, "copy", "Copy", () => openCopy(entry), "copy-link");
+if (entry.movable) appendFileAction(menu, "move", "Move", () => openMove(entry), "move-link");
+if (entry.deletable) {
+if (primaryCount || mutationCount) appendFileActionSeparator(menu);
+appendFileAction(menu, "delete", "Delete", () => openDelete(entry), "delete-link");
+}
+if (menu.querySelectorAll('[role="menuitem"]').length === 0) {
+const unavailable = document.createElement("span"); unavailable.className = "file-unavailable"; unavailable.textContent = entry.kind === "symlink" ? "Symlink" : "Unavailable"; group.append(unavailable); return group;
+}
+const trigger = document.createElement("button");
+trigger.className = "action-menu-trigger"; trigger.type = "button"; trigger.textContent = "⋮"; trigger.title = `Actions for ${entry.name}`; trigger.setAttribute("aria-label", `Actions for ${entry.name}`); trigger.setAttribute("aria-haspopup", "menu"); trigger.setAttribute("aria-expanded", "false");
+trigger.addEventListener("click", (event) => { event.stopPropagation(); const shouldOpen = menu.hidden; closeFileActionMenus(); if (!shouldOpen) return; menu.hidden = false; trigger.setAttribute("aria-expanded", "true"); positionFileActionMenu(trigger, menu); });
+menu.addEventListener("click", (event) => { event.stopPropagation(); if (event.target.closest("button, a")) closeFileActionMenus(); });
+group.append(trigger, menu); return group;
+}
+document.addEventListener("click", closeFileActionMenus);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeFileActionMenus(); });
+window.addEventListener("resize", closeFileActionMenus);
+window.addEventListener("scroll", closeFileActionMenus, true);
+'''
+js=sub_once(js,r'function closeFileActionMenus\(\) \{.*?(?=function fileKindIcon\(kind\) \{)',menu,'action menu helpers')
+# operation display names and move no name input
+js=js.replace('$("#rename-source-path").textContent = entry.path;', '$("#rename-source-path").textContent = entry.name;',1)
+js=js.replace('$("#copy-source-path").textContent = entry.path;', '$("#copy-source-path").textContent = entry.name;',1)
+js=js.replace('$("#move-source-path").textContent = entry.path;', '$("#move-source-path").textContent = entry.name;',1)
+js=js.replace('$("#move-name-input").value = entry.name;\n','',1)
+# insert delete/picker functions before arrayBuffer
+marker='function arrayBufferToBase64(buffer) {'
+extra=r'''function openDelete(entry) {
+state.deletePath = entry.path; state.deleteName = entry.name; state.deleteKind = entry.kind;
+$("#delete-source-path").textContent = entry.name;
+clearError("#delete-error"); openDialog("#delete-dialog");
+}
+async function openDestinationPicker(mode) {
+state.destinationMode = mode;
+const input = mode === "copy" ? $("#copy-destination-input") : $("#move-destination-input");
+state.destinationPickerPath = input.value.trim() || state.currentPath || "/";
+clearError("#destination-error"); openDialog("#destination-dialog");
+await loadDestinationPicker(state.destinationPickerPath);
+}
