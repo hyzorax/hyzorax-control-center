@@ -1,0 +1,111 @@
+name: Build and release V1.5.4 File Manager
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build-v154:
+    if: github.event.pull_request.head.ref == 'agent/v1.5.4-filemanager-polish'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+
+      - name: Download V1.5.3 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.5.3 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+
+      - name: Apply V1.5.4
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.5.4/apply.py
+          python3 release-patch/v1.5.4/apply.py work/hyzorax-control
+          cd work/hyzorax-control
+          gofmt -w internal/web/assets_test.go internal/httpapi/app_test.go
+
+      - name: Static UI checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hyzorax-control-tls
+          bash -n packaging/hyzorax-control-updater
+          bash -n packaging/hz
+          grep -q 'Version 1.5.4' internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 9' internal/helper/protocol.go
+          grep -q 'id="editor-line-numbers"' internal/web/static/index.html
+          grep -q 'id="confirmation-dialog"' internal/web/static/index.html
+          grep -q 'recycle-bin-columns' internal/web/static/index.html
+          grep -q 'fileVisualType' internal/web/static/app.js
+          grep -q 'showPanelConfirmation' internal/web/static/app.js
+          grep -q 'Confirm update' internal/web/static/app.js
+          grep -q 'updateEditorLineNumbers' internal/web/static/app.js
+          grep -q 'file-type-folder' internal/web/static/app.css
+          grep -q 'image-preview-card' internal/web/static/app.css
+          if grep -q 'window.confirm(' internal/web/static/app.js; then
+            echo 'Native browser confirm remains' >&2
+            exit 1
+          fi
+          if grep -q 'Maximum 1 MB. If the file changes elsewhere after opening, saving is rejected until you reopen it.' internal/web/static/index.html; then
+            echo 'Old editor note remains' >&2
+            exit 1
+          fi
+          if grep -q 'id="recycle-bin-refresh"' internal/web/static/index.html; then
+            echo 'Recycle Bin refresh control remains' >&2
+            exit 1
+          fi
+
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+
+      - name: Build and verify V1.5.4
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.5.4
+          ./build/hyzorax-control -version | grep -q '1.5.4'
+          ./build/hyzorax-control-helper -version | grep -q '1.5.4'
+          (cd build && sha256sum -c SHA256SUMS)
+
+      - name: Package release assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+
+      - name: Publish V1.5.4 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.5.4 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.5.4 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.5.4' \
+            --notes 'File Manager polish release. Removes the old editor note and replaces the editor with a cleaner panel-native code editor layout with line numbers, UTF-8 badge, Ctrl/Cmd+S and Tab handling. Fixes image preview so it uses one fitted viewport without nested/double scrolling. Replaces browser-native update and permanent-delete confirmations with HYZoraX dialogs. Reworks Recycle Bin into a computer-style full browser table, removes the redundant Refresh button, and adds contextual SVG icons for folders, images, text, code/config, archives, databases, certificates, links and generic files. Helper protocol remains V9.' \
+            --latest
