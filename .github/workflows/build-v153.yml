@@ -1,0 +1,103 @@
+name: Build and release V1.5.3 File Manager
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build-v153:
+    if: github.event.pull_request.head.ref == 'agent/v1.5.3-preview-recycle-upload'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+
+      - name: Download V1.5.2 source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p work
+          gh release download v1.5.2 --repo "${GITHUB_REPOSITORY}" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' --output /tmp/base.tar.gz
+          tar -xzf /tmp/base.tar.gz -C work
+          test -d work/hyzorax-control
+
+      - name: Apply V1.5.3
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.5.3/preapply.py release-patch/v1.5.3/apply.py release-patch/v1.5.3/postapply.py
+          python3 release-patch/v1.5.3/preapply.py work/hyzorax-control
+          python3 release-patch/v1.5.3/apply.py work/hyzorax-control
+          python3 release-patch/v1.5.3/postapply.py work/hyzorax-control
+          cd work/hyzorax-control
+          gofmt -w internal/helper/protocol.go internal/helper/server_linux.go internal/helper/filesystem_linux.go internal/helper/filesystem_linux_test.go internal/httpapi/app.go internal/httpapi/handlers.go internal/httpapi/files_test.go internal/web/assets_test.go internal/httpapi/app_test.go
+
+      - name: Static and security checks
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh
+          bash -n packaging/hyzorax-control-tls
+          bash -n packaging/hyzorax-control-updater
+          bash -n packaging/hz
+          grep -q 'Version 1.5.3' internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 9' internal/helper/protocol.go
+          grep -q 'GET /api/v1/files/preview' internal/httpapi/app.go
+          grep -q 'GET /api/v1/files/recycle-bin' internal/httpapi/app.go
+          grep -q 'filesystem.trash' internal/helper/server_linux.go
+          grep -q 'filesystem.recycle.restore' internal/helper/server_linux.go
+          grep -q 'filesystemRecycleMetadataDir' internal/helper/filesystem_linux.go
+          grep -q 'id="upload-drop-zone"' internal/web/static/index.html
+          grep -q 'Upload completed successfully' internal/web/static/app.js
+          grep -q 'id="image-preview-dialog"' internal/web/static/index.html
+          grep -q 'id="recycle-bin-dialog"' internal/web/static/index.html
+          grep -q 'file-name-button' internal/web/static/app.js
+          grep -q 'Move to Recycle Bin' internal/web/static/index.html
+
+      - name: Test and vet
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          go test ./...
+          go vet ./...
+
+      - name: Build and verify V1.5.3
+        run: |
+          set -Eeuo pipefail
+          cd work/hyzorax-control
+          make clean
+          make release VERSION=1.5.3
+          ./build/hyzorax-control -version | grep -q '1.5.3'
+          ./build/hyzorax-control-helper -version | grep -q '1.5.3'
+          (cd build && sha256sum -c SHA256SUMS)
+
+      - name: Package release assets
+        run: |
+          set -Eeuo pipefail
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C work hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+
+      - name: Publish V1.5.3 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete v1.5.3 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.5.3 \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --title 'HYZoraX Control Panel V1.5.3' \
+            --notes 'File Manager usability and recovery update. File/folder names now open their natural action: folders browse, editable text files open the editor, and PNG/JPEG/WebP/GIF images open an authenticated inline preview. Browser Delete now moves guarded files/directories into a recoverable Recycle Bin with Restore and explicit permanent purge. Upload is redesigned as an aaPanel-style persistent dialog with drag/drop, selected-file status and progress feedback; a successful upload refreshes the directory but the dialog stays open until the user closes it. Critical-config backup/syntax-validation work is intentionally deferred for a later Settings/Advanced Tools phase. Helper protocol V9.' \
+            --latest
