@@ -126,4 +126,13 @@ if "Version 1.7.1" not in html:
     raise SystemExit("V1.7.1 panel version marker not found")
 index_path.write_text(html.replace("Version 1.7.1", "Version 1.7.2", 1), encoding="utf-8")
 
+# Existing release-version assertions intentionally pin the embedded UI text.
+# Keep them in sync with this hotfix release without weakening the tests.
+for rel in ("internal/httpapi/app_test.go", "internal/web/assets_test.go"):
+    path = root / rel
+    body = path.read_text(encoding="utf-8")
+    if "Version 1.7.1" not in body:
+        raise SystemExit(f"V1.7.1 version assertion marker not found in {rel}")
+    path.write_text(body.replace("Version 1.7.1", "Version 1.7.2"), encoding="utf-8")
+
 print("Applied HYZoraX V1.7.2 SSH alias/no-op lockout hotfix")
