@@ -34,8 +34,9 @@ jobs:
       - name: Apply V1.6.5
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile release-patch/v1.6.5/apply.py
+          python3 -m py_compile release-patch/v1.6.5/apply.py release-patch/v1.6.5/fix_scope.py
           python3 release-patch/v1.6.5/apply.py work/hyzorax-control
+          python3 release-patch/v1.6.5/fix_scope.py work/hyzorax-control
           cd work/hyzorax-control
           gofmt -w internal/installer/*.go internal/helper/*.go internal/web/assets_test.go internal/httpapi/app_test.go
       - name: Static and security checks
@@ -75,13 +76,11 @@ jobs:
             [[ -e "$path" || -L "$path" ]] && conflicts+=("$path")
           done
           if [[ -d /opt/hyzorax/node-v24.19.0 || -f /var/lib/hyzorax-control/installer-managed/node24 ]]; then
-            echo 'Runner has HYZoraX Node state; verify refusal first.'
             sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestNode24InstallerRejectsExistingManagedPath$' -count=1 -v
             sudo rm -rf /opt/hyzorax/node-v24.19.0 /opt/hyzorax/node-v24.19.0-linux-x64
             sudo rm -f /var/lib/hyzorax-control/installer-managed/node24
           fi
           if (( ${#conflicts[@]} > 0 )); then
-            echo "Disposable runner has /usr/local Node command conflicts: ${conflicts[*]}"
             mkdir -p /tmp/hyzorax-node-command-backup
             for path in "${conflicts[@]}"; do sudo mv "$path" "/tmp/hyzorax-node-command-backup/$(basename "$path")"; done
           fi
