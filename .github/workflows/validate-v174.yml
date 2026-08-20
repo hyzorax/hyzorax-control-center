@@ -1,0 +1,66 @@
+name: Validate V1.7.4 Runtime Hotfix
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  validate-v174:
+    if: github.head_ref == 'agent/v1.7.4-runtime-hotfix'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download exact V1.7.3 release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/v174
+          gh release download v1.7.3 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v174
+          cd /tmp/v174
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+      - name: Apply V1.7.4 patch
+        run: python3 release-patch/v1.7.4/runtime_hotfix.py /tmp/v174/hyzorax-control
+      - name: Static regression checks
+        run: |
+          set -Eeuo pipefail
+          SRC=/tmp/v174/hyzorax-control
+          grep -q 'RestrictAddressFamilies=AF_UNIX AF_NETLINK' "$SRC/build/hyzorax-control-helper.service"
+          grep -q 'RestrictAddressFamilies=AF_UNIX AF_NETLINK' "$SRC/packaging/hyzorax-control-helper.service"
+          grep -q 'panel_ip_is_global=false' "$SRC/build/bootstrap.sh"
+          grep -q 'trusted IP TLS is not applicable in this local/private environment' "$SRC/build/bootstrap.sh"
+          grep -q 'Version 1.7.4' "$SRC/internal/web/static/index.html"
+          ! grep -q 'RestrictAddressFamilies=AF_UNIX$' "$SRC/build/hyzorax-control-helper.service"
+      - name: Test and vet
+        working-directory: /tmp/v174/hyzorax-control
+        run: |
+          go test ./...
+          go vet ./...
+      - name: Build V1.7.4 binaries
+        working-directory: /tmp/v174/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X main.version=1.7.4' -o build/hyzorax-control ./cmd/hyzorax-control
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X main.version=1.7.4' -o build/hyzorax-control-helper ./cmd/hyzorax-control-helper
+          ./build/hyzorax-control -version | grep -q '1.7.4'
+          ./build/hyzorax-control-helper -version 2>&1 | grep -q '1.7.4'
+      - name: Private-IP TLS bootstrap regression
+        run: |
+          set -Eeuo pipefail
+          SRC=/tmp/v174/hyzorax-control
+          python3 - <<'PY'
+          import ipaddress
+          assert not ipaddress.ip_address('10.0.2.15').is_global
+          assert not ipaddress.ip_address('192.168.1.2').is_global
+          assert ipaddress.ip_address('8.8.8.8').is_global
+          PY
+          bash -n "$SRC/build/bootstrap.sh"
+          bash -n "$SRC/packaging/bootstrap.sh"
+      - name: Helper systemd sandbox regression
+        run: |
+          set -Eeuo pipefail
+          UNIT=/tmp/v174/hyzorax-control/build/hyzorax-control-helper.service
+          systemd-analyze verify "$UNIT"
+          grep -Eq '^RestrictAddressFamilies=.*AF_UNIX.*AF_NETLINK' "$UNIT"
