@@ -1,0 +1,82 @@
+name: Publish V1.7.4
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened]
+permissions:
+  contents: write
+jobs:
+  publish-v174:
+    if: github.head_ref == 'agent/v1.7.4-release-finalizer'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download exact V1.7.3 release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/v174
+          gh release download v1.7.3 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v174
+          cd /tmp/v174
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+      - name: Apply validated V1.7.4 patch
+        run: python3 release-patch/v1.7.4/runtime_hotfix.py /tmp/v174/hyzorax-control
+      - name: Test and vet
+        working-directory: /tmp/v174/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          go test ./...
+          go vet ./...
+      - name: Build release package
+        working-directory: /tmp/v174/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          make release VERSION=1.7.4
+          TAR="$(find . -type f -name 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' -print -quit)"
+          SHA="$(find . -type f -name 'HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256' -print -quit)"
+          test -n "$TAR"
+          test -n "$SHA"
+          cp "$TAR" /tmp/v174/HYZoraX_Control_Center_Linux_x86_64.tar.gz
+          cp "$SHA" /tmp/v174/HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          cd /tmp/v174
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          rm -rf verify
+          mkdir verify
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C verify
+          test -x verify/hyzorax-control/build/hyzorax-control
+          test -x verify/hyzorax-control/build/hyzorax-control-helper
+          test "$(verify/hyzorax-control/build/hyzorax-control -version | awk '{print $NF}')" = '1.7.4'
+          test "$(verify/hyzorax-control/build/hyzorax-control-helper -version | awk '{print $NF}')" = '1.7.4'
+          grep -q 'RestrictAddressFamilies=AF_UNIX AF_NETLINK' verify/hyzorax-control/build/hyzorax-control-helper.service
+          (cd verify/hyzorax-control/build && sha256sum --check --strict SHA256SUMS)
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view v1.7.4 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v1.7.4 already exists; refusing duplicate publish.' >&2
+            exit 1
+          fi
+          gh release create v1.7.4 \
+            /tmp/v174/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            /tmp/v174/HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target 9483ccf9c8184df8ea38b4b06766ac455e8c2cac \
+            --title 'HYZoraX Control Panel V1.7.4' \
+            --notes 'Runtime hotfix for guarded UFW operations and local/private-IP TLS update behavior. The privileged helper now ships with AF_NETLINK so UFW can inspect/apply firewall state under systemd sandboxing. Private/non-global IP environments no longer fail an otherwise successful install/update because public IP-SAN TLS is not applicable there; public VPS TLS remains strict.' \
+            --latest
+      - name: Verify published latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          test "$latest" = 'v1.7.4'
+          rm -rf /tmp/v174/published
+          mkdir -p /tmp/v174/published
+          gh release download v1.7.4 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v174/published
+          cd /tmp/v174/published
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
