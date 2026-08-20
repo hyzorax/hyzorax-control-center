@@ -1,0 +1,112 @@
+name: Publish V1.7.3 Firewall Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v173.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-v173:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download validated V1.7.3 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/hyzorax-v173
+          mkdir -p /tmp/hyzorax-v173
+          gh run download 32340315052 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name 'HYZoraX-V1.7.3-firewall-validation' \
+            --dir /tmp/hyzorax-v173
+          test -s /tmp/hyzorax-v173/HYZoraX_Control_Center_Linux_x86_64.tar.gz
+          test -s /tmp/hyzorax-v173/HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          cd /tmp/hyzorax-v173
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xOf HYZoraX_Control_Center_Linux_x86_64.tar.gz hyzorax-control/internal/helper/protocol.go | grep -q 'const ProtocolVersion = 20'
+          tar -xOf HYZoraX_Control_Center_Linux_x86_64.tar.gz hyzorax-control/internal/web/static/index.html | grep -q 'Version 1.7.3'
+
+      - name: Publish V1.7.3 as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view v1.7.3 --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo 'v1.7.3 already exists; refusing to overwrite an existing release.' >&2
+            exit 1
+          fi
+          gh release create v1.7.3 \
+            /tmp/hyzorax-v173/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            /tmp/hyzorax-v173/HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target d3fed4900988f93c724a1759a68c838152985171 \
+            --title 'HYZoraX Control Panel V1.7.3' \
+            --notes 'V1.7.3 continues P7 with guarded UFW firewall controls. It adds typed helper/API operations for firewall enable, disable, allow/deny rule add and HYZoraX-owned rule removal; protects the active SSH and panel ports against self-lockout; handles IPv4 and IPv6 explicitly; refuses takeover when inactive UFW coexists with unmanaged nftables rules; validates changes before apply; rolls back failed activation/protection staging; records audit events; and keeps raw/custom nftables read-only. Existing/manual firewall rules remain visible but are not destructively managed. Helper protocol is V20 and the hz main menu is unchanged. Validation passed against the exact V1.7.2 release source, including go test ./..., go vet ./..., static safety checks, real Ubuntu 24.04 UFW acceptance, release build, internal checksums and package checksum verification.' \
+            --latest
+
+      - name: Verify published release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf /tmp/hyzorax-v173-release-check
+          mkdir -p /tmp/hyzorax-v173-release-check
+          gh release download v1.7.3 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' \
+            --dir /tmp/hyzorax-v173-release-check
+          cd /tmp/hyzorax-v173-release-check
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+
+      - name: Record release status and remove temporary publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'hyzorax'
+          git config user.email 'hyzorax@gmail.com'
+          git fetch origin main
+          git checkout -B main origin/main
+          cat > release-status/v1.7.3.txt <<EOF
+          status=success
+          version=1.7.3
+          scope=p7-guarded-firewall-controls
+          base_release=v1.7.2
+          helper_protocol=20
+          validation_run_id=32340315052
+          validation_job_id=96337923413
+          validation_artifact_id=9396133612
+          validation_artifact_digest=sha256:661b0059fe4f4cf041b049b3e151618027d253f0c58f28703b80496d28f9c6cf
+          validation_source_head=adf640caf6cb7a6ed17d54ef507c971d8fc3ee52
+          go_test=passed
+          go_vet=passed
+          static_safety=passed
+          ubuntu_24_04_firewall_acceptance=passed
+          build=passed
+          checksums=passed
+          packaging=passed
+          merge_pr=39
+          merge_commit=d3fed4900988f93c724a1759a68c838152985171
+          release_publish_run_id=${GITHUB_RUN_ID}
+          release_tag=v1.7.3
+          release_latest=true
+          raw_nftables_writes=false
+          hz_menu=unchanged
+          next_target=p7-fail2ban-management
+          EOF
+          rm -f release-status/v1.7.3-candidate.txt
+          git rm .github/workflows/publish-v173.yml
+          git add -- release-status/v1.7.3.txt
+          git rm --ignore-unmatch release-status/v1.7.3-candidate.txt
+          git commit -m 'Record V1.7.3 firewall controls release status'
+          git push origin HEAD:main
