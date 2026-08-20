@@ -10,7 +10,7 @@ import base64
 import gzip
 import hashlib
 
-EXPECTED_SHA256 = "cb89392d59660f048b5ec2924eb963b0bff41e728472040740487dc93e6105ce"
+EXPECTED_SHA256 = "708f4f50aa337fc636eda42a927c2d053a8145aef8c1bd2a2fdd33fbe13c99c4"
 base = Path(__file__).resolve().parent
 parts = sorted(base.glob("firewall_controls.py.gz.b64.part*"))
 if not parts:
