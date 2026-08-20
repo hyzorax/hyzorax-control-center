@@ -61,6 +61,12 @@ jobs:
       - name: Helper systemd sandbox regression
         run: |
           set -Eeuo pipefail
-          UNIT=/tmp/v174/hyzorax-control/build/hyzorax-control-helper.service
+          SRC=/tmp/v174/hyzorax-control
+          UNIT="$SRC/build/hyzorax-control-helper.service"
+          sudo install -D -m 0755 "$SRC/build/hyzorax-control-helper" /usr/local/libexec/hyzorax-control-helper
+          sudo install -d -m 0755 /var/lib/hyzorax-control /run/hyzorax-control
+          sudo touch /var/lib/hyzorax-control/control.db
           systemd-analyze verify "$UNIT"
           grep -Eq '^RestrictAddressFamilies=.*AF_UNIX.*AF_NETLINK' "$UNIT"
+          systemd-analyze security "$UNIT" >/tmp/v174/helper-security.txt || true
+          grep -q 'RestrictAddressFamilies' /tmp/v174/helper-security.txt
