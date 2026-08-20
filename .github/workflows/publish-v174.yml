@@ -33,14 +33,53 @@ jobs:
         working-directory: /tmp/v174/hyzorax-control
         run: |
           set -Eeuo pipefail
-          make release VERSION=1.7.4
-          TAR="$(find . -type f -name 'HYZoraX_Control_Center_Linux_x86_64.tar.gz' -print -quit)"
-          SHA="$(find . -type f -name 'HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256' -print -quit)"
-          test -n "$TAR"
-          test -n "$SHA"
-          cp "$TAR" /tmp/v174/HYZoraX_Control_Center_Linux_x86_64.tar.gz
-          cp "$SHA" /tmp/v174/HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          mkdir -p build
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.4' -o build/hyzorax-control ./cmd/hyzorax-control
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.4' -o build/hyzorax-control-helper ./cmd/hyzorax-control-helper
+          cp \
+            packaging/config.toml \
+            packaging/hyzorax-control.service \
+            packaging/hyzorax-control-helper.service \
+            packaging/hyzorax-control-tls-renew.service \
+            packaging/hyzorax-control-tls-renew.timer \
+            packaging/hyzorax-control.tmpfiles.conf \
+            packaging/bootstrap.sh \
+            packaging/hyzorax-control-tls \
+            packaging/hyzorax-control-updater \
+            packaging/hyzorax-dashboard \
+            packaging/hz \
+            build/
+          chmod 0755 build/bootstrap.sh build/hyzorax-control-tls build/hyzorax-control-updater build/hyzorax-dashboard build/hz
+          files=(
+            hyzorax-control
+            hyzorax-control-helper
+            config.toml
+            hyzorax-control.service
+            hyzorax-control-helper.service
+            hyzorax-control-tls-renew.service
+            hyzorax-control-tls-renew.timer
+            hyzorax-control.tmpfiles.conf
+            bootstrap.sh
+            hyzorax-control-tls
+            hyzorax-control-updater
+            hyzorax-dashboard
+            hz
+          )
+          for f in "${files[@]}"; do
+            test -f "build/$f" || { echo "Missing release file: $f" >&2; ls -la build; exit 1; }
+          done
+          (
+            cd build
+            sha256sum "${files[@]}" > SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+          test "$(build/hyzorax-control -version | awk '{print $NF}')" = '1.7.4'
+          test "$(build/hyzorax-control-helper -version | awk '{print $NF}')" = '1.7.4'
+          grep -q 'RestrictAddressFamilies=AF_UNIX AF_NETLINK' build/hyzorax-control-helper.service
           cd /tmp/v174
+          rm -f HYZoraX_Control_Center_Linux_x86_64.tar.gz HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
           sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
           rm -rf verify
           mkdir verify
