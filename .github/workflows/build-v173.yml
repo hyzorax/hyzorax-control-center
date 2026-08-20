@@ -1,3 +1,4 @@
+# Temporary PR-only validation workflow; remove before merge.
 name: Validate V1.7.3 Firewall Controls
 
 on:
