@@ -1,0 +1,9 @@
+status=publish-finalizer
+version=1.7.4
+merge_pr=41
+merge_commit=9483ccf9c8184df8ea38b4b06766ac455e8c2cac
+validation_run_id=32421670824
+validation_job_id=96594824564
+validation=passed
+release_tag=v1.7.4
+release_status=pending
