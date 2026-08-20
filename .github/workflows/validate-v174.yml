@@ -63,10 +63,13 @@ jobs:
           set -Eeuo pipefail
           SRC=/tmp/v174/hyzorax-control
           UNIT="$SRC/build/hyzorax-control-helper.service"
+          INSTALLED_UNIT=/etc/systemd/system/hyzorax-control-helper.service
           sudo install -D -m 0755 "$SRC/build/hyzorax-control-helper" /usr/local/libexec/hyzorax-control-helper
           sudo install -d -m 0755 /var/lib/hyzorax-control /run/hyzorax-control
           sudo touch /var/lib/hyzorax-control/control.db
-          systemd-analyze verify "$UNIT"
-          grep -Eq '^RestrictAddressFamilies=.*AF_UNIX.*AF_NETLINK' "$UNIT"
-          systemd-analyze security "$UNIT" >/tmp/v174/helper-security.txt || true
+          sudo install -D -m 0644 "$UNIT" "$INSTALLED_UNIT"
+          sudo systemctl daemon-reload
+          systemd-analyze verify "$INSTALLED_UNIT"
+          grep -Eq '^RestrictAddressFamilies=.*AF_UNIX.*AF_NETLINK' "$INSTALLED_UNIT"
+          systemd-analyze security hyzorax-control-helper.service >/tmp/v174/helper-security.txt || true
           grep -q 'RestrictAddressFamilies' /tmp/v174/helper-security.txt
