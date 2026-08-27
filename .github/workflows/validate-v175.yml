@@ -1,0 +1,80 @@
+name: Validate V1.7.5 Fail2ban Management
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  validate-v175:
+    if: github.head_ref == 'agent/v1.7.5-fail2ban-management'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Download exact V1.7.4 release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/v175
+          gh release download v1.7.4 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v175
+          cd /tmp/v175
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+      - name: Apply V1.7.5 patch
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.7.5/fail2ban_management.py
+          python3 release-patch/v1.7.5/fail2ban_management.py /tmp/v175/hyzorax-control
+      - name: Static security regressions
+        run: |
+          set -Eeuo pipefail
+          SRC=/tmp/v175/hyzorax-control
+          grep -q 'const ProtocolVersion = 21' "$SRC/internal/helper/protocol.go"
+          grep -q 'Version 1.7.5' "$SRC/internal/web/static/index.html"
+          grep -q 'security.fail2ban.apply' "$SRC/internal/helper/server_linux.go"
+          grep -q 'security/fail2ban/apply' "$SRC/internal/httpapi/app.go"
+          grep -q 'securityFail2banManagedMarker' "$SRC/internal/helper/security_linux.go"
+          grep -q 'fail2banLegacyJail' "$SRC/internal/helper/installer_fail2ban_linux.go"
+          grep -q 'id="security-fail2ban-dialog"' "$SRC/internal/web/static/index.html"
+          grep -q 'RestrictAddressFamilies=AF_UNIX AF_NETLINK' "$SRC/packaging/hyzorax-control-helper.service"
+          if grep -Rni --include='security_linux.go' -E 'exec.CommandContext\(ctx,[[:space:]]*input\.|/bin/(ba)?sh|bash -c' "$SRC/internal/helper"; then
+            echo 'Fail2ban management appears to expose dynamic privileged execution' >&2
+            exit 1
+          fi
+          node --check "$SRC/internal/web/static/app.js"
+          bash -n "$SRC/packaging/bootstrap.sh" "$SRC/packaging/hyzorax-control-updater" "$SRC/packaging/hz"
+      - name: Test and vet
+        working-directory: /tmp/v175/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          gofmt -w internal/helper/*.go internal/httpapi/*.go internal/web/*.go
+          go test ./...
+          go vet ./...
+      - name: Real Ubuntu 24.04 Fail2ban management acceptance
+        working-directory: /tmp/v175/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get -o DPkg::Lock::Timeout=120 -y --no-install-recommends install openssh-server
+          if dpkg-query -W -f='${Status}' fail2ban 2>/dev/null | grep -q '^install ok installed$' || [[ -e /etc/fail2ban || -x /usr/bin/fail2ban-client ]]; then
+            sudo systemctl stop fail2ban 2>/dev/null || true
+            sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get -y purge fail2ban python3-systemd nftables || true
+            sudo rm -rf /etc/fail2ban
+          fi
+          sudo rm -f /var/lib/hyzorax-control/installer-managed/fail2ban
+          sudo -E env HYZORAX_INSTALLER_ACCEPTANCE=1 "$(command -v go)" test -tags=integration ./internal/helper -run '^TestFail2banInstallerAcceptance$' -count=1 -v
+          if systemctl is-active --quiet fail2ban 2>/dev/null; then echo 'Fail2ban remained active after rollback' >&2; exit 1; fi
+          if dpkg-query -W -f='${Status}' fail2ban 2>/dev/null | grep -q '^install ok installed$'; then echo 'Fail2ban package remained installed after rollback' >&2; exit 1; fi
+          [[ ! -e /etc/fail2ban ]]
+      - name: Build V1.7.5 binaries
+        working-directory: /tmp/v175/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.5' -o build/hyzorax-control ./cmd/hyzorax-control
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.5' -o build/hyzorax-control-helper ./cmd/hyzorax-control-helper
+          test "$(build/hyzorax-control -version | awk '{print $NF}')" = '1.7.5'
+          test "$(build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.5'
