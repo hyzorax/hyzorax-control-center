@@ -1,0 +1,158 @@
+name: Publish V1.7.6
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened]
+permissions:
+  contents: write
+jobs:
+  publish-v176:
+    if: github.head_ref == 'agent/v1.7.6-release-finalizer'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Download exact V1.7.5 release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/v176
+          gh release download v1.7.5 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v176
+          cd /tmp/v176
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+          sha256sum hyzorax-control/packaging/hz > base-hz.sha256
+      - name: Apply validated V1.7.6 patch
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.7.6/security_activity_sessions.py
+          python3 release-patch/v1.7.6/security_activity_sessions.py /tmp/v176/hyzorax-control
+      - name: Test and vet release source
+        working-directory: /tmp/v176/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          grep -q 'const ProtocolVersion = 21' internal/helper/protocol.go
+          grep -q 'Version 1.7.6' internal/web/static/index.html
+          grep -q 'api/v1/security/activity' internal/httpapi/app.go
+          grep -q 'api/v1/security/sessions/revoke' internal/httpapi/app.go
+          grep -q 'id <> ?' internal/store/store.go
+          grep -q 'user_id = ?' internal/store/store.go
+          grep -q 'securityActivitySessionLimit = 50' internal/httpapi/security_activity.go
+          grep -q 'securityActivityEventLimit = 80' internal/httpapi/security_activity.go
+          grep -q 'Current browser' internal/web/static/app.js
+          grep -q 'Install Fail2ban' internal/web/static/app.js
+          if grep -E 'token_hash|csrf_hash|metadata_json' internal/httpapi/security_activity.go internal/web/static/app.js; then
+            echo 'Security activity payload appears to expose a secret-bearing field' >&2
+            exit 1
+          fi
+          (cd /tmp/v176 && sha256sum -c base-hz.sha256)
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh packaging/hyzorax-control-updater packaging/hz
+          go test ./...
+          go test -race ./internal/store ./internal/httpapi
+          go vet ./...
+      - name: Build release package
+        working-directory: /tmp/v176/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.6' -o build/hyzorax-control ./cmd/hyzorax-control
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.6' -o build/hyzorax-control-helper ./cmd/hyzorax-control-helper
+          cp \
+            packaging/config.toml \
+            packaging/hyzorax-control.service \
+            packaging/hyzorax-control-helper.service \
+            packaging/hyzorax-control-tls-renew.service \
+            packaging/hyzorax-control-tls-renew.timer \
+            packaging/hyzorax-control.tmpfiles.conf \
+            packaging/bootstrap.sh \
+            packaging/hyzorax-control-tls \
+            packaging/hyzorax-control-updater \
+            packaging/hyzorax-dashboard \
+            packaging/hz \
+            build/
+          chmod 0755 build/bootstrap.sh build/hyzorax-control-tls build/hyzorax-control-updater build/hyzorax-dashboard build/hz
+          files=(
+            hyzorax-control
+            hyzorax-control-helper
+            config.toml
+            hyzorax-control.service
+            hyzorax-control-helper.service
+            hyzorax-control-tls-renew.service
+            hyzorax-control-tls-renew.timer
+            hyzorax-control.tmpfiles.conf
+            bootstrap.sh
+            hyzorax-control-tls
+            hyzorax-control-updater
+            hyzorax-dashboard
+            hz
+          )
+          for f in "${files[@]}"; do
+            test -f "build/$f" || { echo "Missing release file: $f" >&2; ls -la build; exit 1; }
+          done
+          (
+            cd build
+            sha256sum "${files[@]}" > SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+          test "$(build/hyzorax-control -version | awk '{print $NF}')" = '1.7.6'
+          test "$(build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.6'
+          grep -q 'RestrictAddressFamilies=AF_UNIX AF_NETLINK' build/hyzorax-control-helper.service
+          cd /tmp/v176
+          rm -f HYZoraX_Control_Center_Linux_x86_64.tar.gz HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          rm -rf /tmp/v176/verify
+          mkdir /tmp/v176/verify
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C /tmp/v176/verify
+          test -x /tmp/v176/verify/hyzorax-control/build/hyzorax-control
+          test -x /tmp/v176/verify/hyzorax-control/build/hyzorax-control-helper
+          test "$(/tmp/v176/verify/hyzorax-control/build/hyzorax-control -version | awk '{print $NF}')" = '1.7.6'
+          test "$(/tmp/v176/verify/hyzorax-control/build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.6'
+          grep -q 'Version 1.7.6' /tmp/v176/verify/hyzorax-control/internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 21' /tmp/v176/verify/hyzorax-control/internal/helper/protocol.go
+          (cd /tmp/v176/verify/hyzorax-control/build && sha256sum --check --strict SHA256SUMS)
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view v1.7.6 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v1.7.6 already exists; refusing duplicate publish.' >&2
+            exit 1
+          fi
+          gh release create v1.7.6 \
+            /tmp/v176/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            /tmp/v176/HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target 1cabec96035d8361028bfd903f90ca37d6b917a6 \
+            --title 'HYZoraX Control Panel V1.7.6' \
+            --notes 'Adds Panel Security Activity & Sessions. Operators can inspect active panel sessions with browser/device, IP address, last-seen time, and expiry; safely revoke another session while the current browser remains protected; and review bounded recent authentication, security, panel-update, and Fail2ban-installer events without exposing token, CSRF, or raw audit metadata. When Fail2ban is absent, the Security page now guides operators to the existing guarded Applications installer. Privileged helper protocol remains V21 and the hz main menu remains unchanged.' \
+            --latest
+      - name: Verify published latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          test "$latest" = 'v1.7.6'
+          target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v1.7.6" --jq .target_commitish)"
+          test "$target" = '1cabec96035d8361028bfd903f90ca37d6b917a6'
+          assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v1.7.6" --jq '[.assets[].name] | sort | join("\n")')"
+          test "$assets" = $'HYZoraX_Control_Center_Linux_x86_64.tar.gz\nHYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256'
+          rm -rf /tmp/v176/published
+          mkdir -p /tmp/v176/published
+          gh release download v1.7.6 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v176/published
+          cd /tmp/v176/published
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+          test "$(hyzorax-control/build/hyzorax-control -version | awk '{print $NF}')" = '1.7.6'
+          test "$(hyzorax-control/build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.6'
+          grep -q 'Version 1.7.6' hyzorax-control/internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 21' hyzorax-control/internal/helper/protocol.go
+          (cd hyzorax-control/build && sha256sum --check --strict SHA256SUMS)
