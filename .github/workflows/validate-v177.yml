@@ -1,0 +1,76 @@
+name: Validate V1.7.7 Installer Deadline Hotfix
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  validate-v177:
+    if: github.head_ref == 'agent/v1.7.7-installer-deadline-hotfix'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Download exact V1.7.6 release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/v177
+          gh release download v1.7.6 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v177
+          cd /tmp/v177
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+          grep -q 'Version 1.7.6' hyzorax-control/internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 21' hyzorax-control/internal/helper/protocol.go
+          sha256sum hyzorax-control/packaging/hz > base-hz.sha256
+      - name: Apply V1.7.7 hotfix
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile release-patch/v1.7.7/installer_deadline_hotfix.py
+          python3 release-patch/v1.7.7/installer_deadline_hotfix.py /tmp/v177/hyzorax-control
+      - name: Verify deadline and UI regressions
+        run: |
+          set -Eeuo pipefail
+          SRC=/tmp/v177/hyzorax-control
+          grep -q 'const ProtocolVersion = 21' "$SRC/internal/helper/protocol.go"
+          grep -q 'Version 1.7.7' "$SRC/internal/web/static/index.html"
+          grep -q 'conn.SetDeadline(helperConnectionDeadline' "$SRC/internal/helper/server_linux.go"
+          grep -q 'helperActionTimeout(request.Action)' "$SRC/internal/helper/server_linux.go"
+          grep -q 'timeout = 12 \* time.Minute' "$SRC/internal/helper/server_linux.go"
+          grep -q 'extendApplicationInstallWriteDeadline' "$SRC/internal/httpapi/applications.go"
+          grep -q 'http.NewResponseController' "$SRC/internal/httpapi/applications.go"
+          grep -q 'applicationInstallTimeout = 12 \* time.Minute' "$SRC/internal/httpapi/applications.go"
+          grep -q 'Installing Ubuntu packages' "$SRC/internal/web/static/app.js"
+          grep -q 'v177-transport' "$SRC/internal/helper/installer_fail2ban_acceptance_test.go"
+          grep -q 'client.Call' "$SRC/internal/helper/installer_fail2ban_acceptance_test.go"
+          (cd /tmp/v177 && sha256sum -c base-hz.sha256)
+          node --check "$SRC/internal/web/static/app.js"
+          bash -n "$SRC/packaging/bootstrap.sh" "$SRC/packaging/hyzorax-control-updater" "$SRC/packaging/hz"
+      - name: Test, race-check, and vet
+        working-directory: /tmp/v177/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          go test ./...
+          go test -tags=integration ./internal/helper
+          go test -race ./internal/helper ./internal/httpapi
+          go vet ./...
+      - name: Real Fail2ban socket-transport acceptance
+        working-directory: /tmp/v177/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          sudo env PATH="$PATH" HYZORAX_INSTALLER_ACCEPTANCE=1 \
+            go test -count=1 -tags=integration -run '^TestFail2banInstallerAcceptance$' -v ./internal/helper
+      - name: Build V1.7.7 binaries
+        working-directory: /tmp/v177/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.7' -o build/hyzorax-control ./cmd/hyzorax-control
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.7' -o build/hyzorax-control-helper ./cmd/hyzorax-control-helper
+          test "$(build/hyzorax-control -version | awk '{print $NF}')" = '1.7.7'
+          test "$(build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.7'
