@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+import base64
+import gzip
+import hashlib
+from pathlib import Path
+import subprocess
+import sys
+
+root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+protocol = root / "internal/helper/protocol.go"
+index = root / "internal/web/static/index.html"
+if not protocol.is_file() or not index.is_file():
+    raise SystemExit("V1.7.6 source root was not found")
+if "const ProtocolVersion = 21" not in protocol.read_text():
+    raise SystemExit("V1.7.7 requires helper protocol V21 as its exact base")
+if "Version 1.7.6" not in index.read_text():
+    raise SystemExit("V1.7.7 requires the V1.7.6 web source as its exact base")
+
+payload = """\
+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
+3ewwpQ04AAA=
+"""
+patch_bytes = gzip.decompress(base64.b64decode(payload))
+expected = "97c851ebf71c9d21a141f593518bd008468162e50ca9b84c36783d04b831545d"
+if hashlib.sha256(patch_bytes).hexdigest() != expected:
+    raise SystemExit("V1.7.7 patch payload checksum mismatch")
+
+subprocess.run(
+    ["patch", "--batch", "--forward", "-p1", "-d", str(root)],
+    input=patch_bytes,
+    check=True,
+)
+if "const ProtocolVersion = 21" not in protocol.read_text():
+    raise SystemExit("V1.7.7 must preserve helper protocol V21")
+if "Version 1.7.7" not in index.read_text():
+    raise SystemExit("V1.7.7 web version update was not applied")
+helper_source = (root / "internal/helper/server_linux.go").read_text()
+api_source = (root / "internal/httpapi/applications.go").read_text()
+ui_source = (root / "internal/web/static/app.js").read_text()
+acceptance_source = (root / "internal/helper/installer_fail2ban_acceptance_test.go").read_text()
+if "conn.SetDeadline(helperConnectionDeadline" not in helper_source:
+    raise SystemExit("V1.7.7 helper connection deadline fix was not applied")
+if "extendApplicationInstallWriteDeadline" not in api_source:
+    raise SystemExit("V1.7.7 HTTP installer deadline fix was not applied")
+if "Installing Ubuntu packages" not in ui_source:
+    raise SystemExit("V1.7.7 installer progress guidance was not applied")
+if "v177-transport" not in acceptance_source or "client.Call" not in acceptance_source:
+    raise SystemExit("V1.7.7 socket transport acceptance was not applied")
+print("Applied V1.7.7 installer deadline hotfix")
