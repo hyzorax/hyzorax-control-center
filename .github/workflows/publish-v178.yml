@@ -1,0 +1,199 @@
+name: Publish V1.7.8
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened]
+permissions:
+  contents: write
+jobs:
+  publish-v178:
+    if: github.head_ref == 'agent/v1.7.8-release-finalizer'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Download exact V1.7.7 release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/v178
+          gh release download v1.7.7 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v178
+          cd /tmp/v178
+          echo '8fc9410c313e294a1cf678bc046112f635e593a108ddcf8abbf0a06ced0b95e3  HYZoraX_Control_Center_Linux_x86_64.tar.gz' | sha256sum -c -
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+          grep -q 'Version 1.7.7' hyzorax-control/internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 21' hyzorax-control/internal/helper/protocol.go
+          sha256sum hyzorax-control/packaging/hz > base-hz.sha256
+      - name: Apply checksum-guarded V1.7.8 hotfix
+        run: |
+          set -Eeuo pipefail
+          echo '24c22939bdc6bdf19693479b2bc6826c1e94610c6cc646795af89331c82b0d00  release-patch/v1.7.8/bodyless_json_hotfix.py' | sha256sum -c -
+          python3 -m py_compile release-patch/v1.7.8/bodyless_json_hotfix.py
+          python3 release-patch/v1.7.8/bodyless_json_hotfix.py /tmp/v178/hyzorax-control
+      - name: Verify browser request contract
+        working-directory: /tmp/v178/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'Version 1.7.8' internal/web/static/index.html
+          grep -Fq 'const method = String(options.method || "GET").toUpperCase();' internal/web/static/app.js
+          grep -Fq 'if (!["GET", "HEAD", "OPTIONS"].includes(method) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");' internal/web/static/app.js
+          ! grep -Fq 'if (options.body && !headers.has("Content-Type"))' internal/web/static/app.js
+          node <<'NODE'
+          const fs = require("fs");
+          const source = fs.readFileSync("internal/web/static/app.js", "utf8");
+          const start = source.indexOf("async function request(path, options = {}) {");
+          const end = source.indexOf("\nfunction readCookie", start);
+          if (start < 0 || end < 0) throw new Error("request helper was not found");
+          const functionSource = source.slice(start, end);
+          let captured;
+          global.fetch = async (_path, options) => {
+            captured = options;
+            return { ok: true, status: 200, json: async () => ({}) };
+          };
+          function readCookie(name) {
+            return name === "hyzorax_csrf" ? "csrf-test" : "";
+          }
+          const request = eval(`(${functionSource})`);
+          (async () => {
+            await request("api/v1/applications/fail2ban/install", { method: "POST" });
+            if (captured.headers.get("Content-Type") !== "application/json") throw new Error("bodyless POST lacks JSON content type");
+            if (captured.headers.get("X-CSRF-Token") !== "csrf-test") throw new Error("bodyless POST lacks CSRF token");
+            await request("api/v1/auth/logout", { method: "post" });
+            if (captured.headers.get("Content-Type") !== "application/json") throw new Error("lowercase bodyless POST lacks JSON content type");
+            await request("api/v1/applications");
+            if (captured.headers.has("Content-Type")) throw new Error("GET unexpectedly received a content type");
+            if (captured.headers.has("X-CSRF-Token")) throw new Error("GET unexpectedly received a CSRF token");
+            console.log("Bodyless mutation JSON contract passed");
+          })().catch((error) => { console.error(error); process.exit(1); });
+          NODE
+      - name: Test and vet release source
+        working-directory: /tmp/v178/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          grep -q 'const ProtocolVersion = 21' internal/helper/protocol.go
+          grep -q 'conn.SetDeadline(helperConnectionDeadline' internal/helper/server_linux.go
+          grep -q 'extendApplicationInstallWriteDeadline' internal/httpapi/applications.go
+          (cd /tmp/v178 && sha256sum -c base-hz.sha256)
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh packaging/hyzorax-control-updater packaging/hz
+          go test ./...
+          go test -tags=integration ./internal/helper
+          go test -race ./internal/helper ./internal/httpapi ./internal/web
+          go vet ./...
+      - name: Real Fail2ban socket-transport acceptance
+        working-directory: /tmp/v178/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          sudo env PATH="$PATH" HYZORAX_INSTALLER_ACCEPTANCE=1 \
+            go test -count=1 -tags=integration -run '^TestFail2banInstallerAcceptance$' -v ./internal/helper
+      - name: Build release package
+        working-directory: /tmp/v178/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.8' -o build/hyzorax-control ./cmd/hyzorax-control
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.8' -o build/hyzorax-control-helper ./cmd/hyzorax-control-helper
+          cp \
+            packaging/config.toml \
+            packaging/hyzorax-control.service \
+            packaging/hyzorax-control-helper.service \
+            packaging/hyzorax-control-tls-renew.service \
+            packaging/hyzorax-control-tls-renew.timer \
+            packaging/hyzorax-control.tmpfiles.conf \
+            packaging/bootstrap.sh \
+            packaging/hyzorax-control-tls \
+            packaging/hyzorax-control-updater \
+            packaging/hyzorax-dashboard \
+            packaging/hz \
+            build/
+          chmod 0755 build/bootstrap.sh build/hyzorax-control-tls build/hyzorax-control-updater build/hyzorax-dashboard build/hz
+          files=(
+            hyzorax-control
+            hyzorax-control-helper
+            config.toml
+            hyzorax-control.service
+            hyzorax-control-helper.service
+            hyzorax-control-tls-renew.service
+            hyzorax-control-tls-renew.timer
+            hyzorax-control.tmpfiles.conf
+            bootstrap.sh
+            hyzorax-control-tls
+            hyzorax-control-updater
+            hyzorax-dashboard
+            hz
+          )
+          for f in "${files[@]}"; do
+            test -f "build/$f" || { echo "Missing release file: $f" >&2; ls -la build; exit 1; }
+          done
+          (
+            cd build
+            sha256sum "${files[@]}" > SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+          test "$(build/hyzorax-control -version | awk '{print $NF}')" = '1.7.8'
+          test "$(build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.8'
+          grep -q 'RestrictAddressFamilies=AF_UNIX AF_NETLINK' build/hyzorax-control-helper.service
+          cd /tmp/v178
+          rm -f HYZoraX_Control_Center_Linux_x86_64.tar.gz HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          rm -rf /tmp/v178/verify
+          mkdir /tmp/v178/verify
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C /tmp/v178/verify
+          test -x /tmp/v178/verify/hyzorax-control/build/hyzorax-control
+          test -x /tmp/v178/verify/hyzorax-control/build/hyzorax-control-helper
+          test "$(/tmp/v178/verify/hyzorax-control/build/hyzorax-control -version | awk '{print $NF}')" = '1.7.8'
+          test "$(/tmp/v178/verify/hyzorax-control/build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.8'
+          grep -q 'Version 1.7.8' /tmp/v178/verify/hyzorax-control/internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 21' /tmp/v178/verify/hyzorax-control/internal/helper/protocol.go
+          grep -Fq 'const method = String(options.method || "GET").toUpperCase();' /tmp/v178/verify/hyzorax-control/internal/web/static/app.js
+          (cd /tmp/v178/verify/hyzorax-control/build && sha256sum --check --strict SHA256SUMS)
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view v1.7.8 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v1.7.8 already exists; refusing duplicate publish.' >&2
+            exit 1
+          fi
+          gh release create v1.7.8 \
+            /tmp/v178/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            /tmp/v178/HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target 0e08999621ae145d11b740ea1ca7e1a97d1f243b \
+            --title 'HYZoraX Control Panel V1.7.8' \
+            --notes 'Fixes guarded application installs being rejected with HTTP 415 before privileged work began. The shared browser request helper now sends application/json and the CSRF token for every mutating request, including bodyless Fail2ban install and logout POSTs, while GET, HEAD, and OPTIONS remain unchanged. The browser request contract is executed directly during validation, and the real Ubuntu 24.04 Fail2ban install, health, policy, unban, and rollback flow remains verified. V1.7.7 installer transport deadlines are retained, helper protocol remains V21, and the hz main menu remains unchanged.' \
+            --latest
+      - name: Verify published latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          test "$latest" = 'v1.7.8'
+          target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v1.7.8" --jq .target_commitish)"
+          test "$target" = '0e08999621ae145d11b740ea1ca7e1a97d1f243b'
+          assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v1.7.8" --jq '[.assets[].name] | sort | join("\n")')"
+          test "$assets" = $'HYZoraX_Control_Center_Linux_x86_64.tar.gz\nHYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256'
+          rm -rf /tmp/v178/published
+          mkdir -p /tmp/v178/published
+          gh release download v1.7.8 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v178/published
+          cd /tmp/v178/published
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+          test "$(hyzorax-control/build/hyzorax-control -version | awk '{print $NF}')" = '1.7.8'
+          test "$(hyzorax-control/build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.8'
+          grep -q 'Version 1.7.8' hyzorax-control/internal/web/static/index.html
+          grep -q 'const ProtocolVersion = 21' hyzorax-control/internal/helper/protocol.go
+          grep -Fq 'const method = String(options.method || "GET").toUpperCase();' hyzorax-control/internal/web/static/app.js
+          grep -q 'conn.SetDeadline(helperConnectionDeadline' hyzorax-control/internal/helper/server_linux.go
+          grep -q 'extendApplicationInstallWriteDeadline' hyzorax-control/internal/httpapi/applications.go
+          (cd hyzorax-control/build && sha256sum --check --strict SHA256SUMS)
