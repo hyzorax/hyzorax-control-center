@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+import base64
+import gzip
+import hashlib
+from pathlib import Path
+import subprocess
+import sys
+
+
+root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+protocol = root / "internal/helper/protocol.go"
+index = root / "internal/web/static/index.html"
+helper_unit = root / "packaging/hyzorax-control-helper.service"
+bootstrap = root / "packaging/bootstrap.sh"
+hz = root / "packaging/hz"
+if not all(path.is_file() for path in (protocol, index, helper_unit, bootstrap, hz)):
+    raise SystemExit("V1.7.8 source root was not found")
+if "const ProtocolVersion = 21" not in protocol.read_text():
+    raise SystemExit("V1.7.9 requires helper protocol V21 as its exact base")
+if "Version 1.7.8" not in index.read_text():
+    raise SystemExit("V1.7.9 requires the V1.7.8 web source as its exact base")
+if "NoNewPrivileges=true" not in helper_unit.read_text():
+    raise SystemExit("V1.7.9 expected the V1.7.8 helper privilege restriction")
+if "RestrictAddressFamilies=AF_UNIX AF_NETLINK\n" not in helper_unit.read_text():
+    raise SystemExit("V1.7.9 expected the V1.7.8 helper address-family restriction")
+
+expected_base = {
+    "build/bootstrap.sh": "f77e9cb9bd52d6a1a5c8e4fe97a5661480e2d6764244e3f5c66f59822044e9e9",
+    "build/hyzorax-control-helper.service": "01fbd5fdde2612a0ac35889116590756a84f3c976f807c3b23c34558b1249935",
+    "internal/helper/installer_composer_linux.go": "5e67ef08e6ee6abb067741c8bfee79fad69971cd0edb2deb920c5d5e819c410f",
+    "internal/helper/installer_fail2ban_acceptance_test.go": "249075fc47946f346a98a88caa3c0e0b57d458a2643ba4c258e150602374cf99",
+    "internal/helper/installer_fail2ban_linux.go": "969da4dce301983a81185d2064818588a4dad4b827a66193195ad355fac7a58e",
+    "internal/helper/installer_nginx_linux.go": "4214a8765c938e694c88a732e4c99703192cf66fb2e3e3620b6aabead38d216b",
+    "internal/helper/installer_node24_linux.go": "f32a3cf723df5c40a0884fed969ffb6632ff4f3f143da85690b47ab27fcd23fe",
+    "internal/helper/installer_php84_linux.go": "f0658e1da7dec4f0941ffb0c1079f075018628ebe3fc7f21ab572a1b87b4a86b",
+    "internal/helper/installer_postgresql18_linux.go": "5fff202fdaebff8a3d5a9d8fcded266ccae626c9768488c36fe80f7b439250ac",
+    "internal/helper/installer_redis_linux.go": "f7d9f2913037987b74e7d79484aad78569bf0b2f73d9d55ac642c0cf35fdcc14",
+    "internal/httpapi/app_test.go": "57d6f14908f3a5bcc0d0cf4adcfe27ebb35e7ae2cbcecf305e99d61dc1ea674f",
+    "internal/web/assets_test.go": "48a7200b89bbaa19eeb8e22bfeedc105c7847c456439d0341365a4bfdc8e52b5",
+    "internal/web/static/index.html": "0225d2cc15e2186af088cc4b832538d1eb1726c0dceceeb22a8b5f3427c8f239",
+    "packaging/bootstrap.sh": "f77e9cb9bd52d6a1a5c8e4fe97a5661480e2d6764244e3f5c66f59822044e9e9",
+    "packaging/hyzorax-control-helper.service": "01fbd5fdde2612a0ac35889116590756a84f3c976f807c3b23c34558b1249935",
+}
+for relative, expected in expected_base.items():
+    actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+    if actual != expected:
+        raise SystemExit(f"V1.7.9 exact-base checksum mismatch: {relative}")
+for relative in (
+    "internal/helper/helper_service_contract_linux_test.go",
+    "internal/helper/installer_apt_linux.go",
+    "internal/helper/installer_apt_linux_test.go",
+):
+    if (root / relative).exists():
+        raise SystemExit(f"V1.7.9 expected new file to be absent: {relative}")
+if hashlib.sha256(hz.read_bytes()).hexdigest() != "7ecc6c68e5507007424ca263fa0ee4b1ece25aae9c60257fb283d6cc62cd21b5":
+    raise SystemExit("V1.7.9 requires the unchanged hz main menu")
+
+payload = """\
+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
+L03RQ7pmo/K/PB1bVD+XAAA=
+"""
+patch_bytes = gzip.decompress(base64.b64decode(payload))
+expected_patch = "f6495721a448821ccae39752b9e23058aa1148f28d8611fe77d26b4ae48e6f02"
+if hashlib.sha256(patch_bytes).hexdigest() != expected_patch:
+    raise SystemExit("V1.7.9 patch payload checksum mismatch")
+
+subprocess.run(
+    ["patch", "--batch", "--forward", "-p1", "-d", str(root)],
+    input=patch_bytes,
+    check=True,
+)
+
+unit_source = helper_unit.read_text()
+bootstrap_source = bootstrap.read_text()
+if "Version 1.7.9" not in index.read_text():
+    raise SystemExit("V1.7.9 web version update was not applied")
+if "NoNewPrivileges=false" not in unit_source or "NoNewPrivileges=true" in unit_source:
+    raise SystemExit("V1.7.9 helper privilege compatibility was not applied")
+if "RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6" not in unit_source:
+    raise SystemExit("V1.7.9 helper network compatibility was not applied")
+for expected in (
+    "remove_exact_helper_dropin",
+    "20-installer-network.conf",
+    "20-installer-runtime.conf",
+    "21-apt-diagnostic.conf",
+    "Preserving unrecognized helper drop-in",
+):
+    if expected not in bootstrap_source:
+        raise SystemExit(f"V1.7.9 bootstrap cleanup is missing: {expected}")
+if not (root / "internal/helper/installer_apt_linux.go").is_file():
+    raise SystemExit("V1.7.9 APT diagnostics were not applied")
+if not (root / "internal/helper/helper_service_contract_linux_test.go").is_file():
+    raise SystemExit("V1.7.9 helper service contract test was not applied")
+if "const ProtocolVersion = 21" not in protocol.read_text():
+    raise SystemExit("V1.7.9 must preserve helper protocol V21")
+if hashlib.sha256(hz.read_bytes()).hexdigest() != "7ecc6c68e5507007424ca263fa0ee4b1ece25aae9c60257fb283d6cc62cd21b5":
+    raise SystemExit("V1.7.9 changed the hz main menu")
+print("Applied V1.7.9 guarded installer runtime hotfix")
