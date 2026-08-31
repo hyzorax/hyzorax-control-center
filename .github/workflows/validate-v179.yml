@@ -99,10 +99,10 @@ jobs:
           sudo systemctl start hyzorax-control-helper.service
           sudo systemctl is-active --quiet hyzorax-control-helper.service
           for attempt in {1..50}; do
-            test -S /run/hyzorax-control/helper.sock && break
+            sudo test -S /run/hyzorax-control/helper.sock && break
             sleep 0.1
           done
-          test -S /run/hyzorax-control/helper.sock
+          sudo test -S /run/hyzorax-control/helper.sock
           main_pid="$(sudo systemctl show hyzorax-control-helper.service -p MainPID --value)"
           test "$main_pid" -gt 1
           sudo grep -Eq '^NoNewPrivs:[[:space:]]+0$' "/proc/$main_pid/status"
