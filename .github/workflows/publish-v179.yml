@@ -1,0 +1,220 @@
+name: Publish V1.7.9
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened]
+permissions:
+  contents: write
+jobs:
+  publish-v179:
+    if: github.head_ref == 'agent/v1.7.9-release-finalizer'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Download exact V1.7.8 release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/v179
+          gh release download v1.7.8 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v179
+          cd /tmp/v179
+          echo '60a7e1dfbf8a7ba57228f744646c9e7ac6e7443486e3db77f15ced85d7f55ae7  HYZoraX_Control_Center_Linux_x86_64.tar.gz' | sha256sum -c -
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+          grep -Fq 'Version 1.7.8' hyzorax-control/internal/web/static/index.html
+          grep -Fq 'const ProtocolVersion = 21' hyzorax-control/internal/helper/protocol.go
+          sha256sum hyzorax-control/packaging/hz > base-hz.sha256
+      - name: Apply checksum-guarded V1.7.9 hotfix
+        run: |
+          set -Eeuo pipefail
+          echo '5d38f3b2910ee6018ba052d5cb21e24a34664913e3c1e7b4018830d52258b32c  release-patch/v1.7.9/installer_runtime_hotfix.py' | sha256sum -c -
+          python3 -m py_compile release-patch/v1.7.9/installer_runtime_hotfix.py
+          python3 release-patch/v1.7.9/installer_runtime_hotfix.py /tmp/v179/hyzorax-control
+      - name: Verify installer runtime and retained contracts
+        working-directory: /tmp/v179/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'Version 1.7.9' internal/web/static/index.html
+          grep -Fxq 'NoNewPrivileges=false' packaging/hyzorax-control-helper.service
+          ! grep -Fxq 'NoNewPrivileges=true' packaging/hyzorax-control-helper.service
+          grep -Fxq 'RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6' packaging/hyzorax-control-helper.service
+          cmp packaging/hyzorax-control-helper.service build/hyzorax-control-helper.service
+          cmp packaging/bootstrap.sh build/bootstrap.sh
+          grep -Fq '20-installer-network.conf' packaging/bootstrap.sh
+          grep -Fq '20-installer-runtime.conf' packaging/bootstrap.sh
+          grep -Fq '21-apt-diagnostic.conf' packaging/bootstrap.sh
+          grep -Fq 'Preserving unrecognized helper drop-in' packaging/bootstrap.sh
+          grep -Fq "privileged helper runtime blocked APT's _apt user transition" internal/helper/installer_apt_linux.go
+          grep -Fq 'server clock is behind Ubuntu repository metadata' internal/helper/installer_apt_linux.go
+          grep -Fq 'const ProtocolVersion = 21' internal/helper/protocol.go
+          grep -Fq 'const method = String(options.method || "GET").toUpperCase();' internal/web/static/app.js
+          grep -Fq 'if (!["GET", "HEAD", "OPTIONS"].includes(method) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");' internal/web/static/app.js
+          (cd /tmp/v179 && sha256sum -c base-hz.sha256)
+      - name: Unit, integration, race and vet
+        working-directory: /tmp/v179/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh build/bootstrap.sh packaging/hyzorax-control-updater packaging/hz
+          go test ./...
+          go test -tags=integration ./internal/helper
+          go test -race ./internal/helper ./internal/httpapi ./internal/web
+          go vet ./...
+      - name: Build V1.7.9 binaries
+        working-directory: /tmp/v179/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.9' -o build/hyzorax-control ./cmd/hyzorax-control
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '-s -w -X main.version=1.7.9' -o build/hyzorax-control-helper ./cmd/hyzorax-control-helper
+          test "$(build/hyzorax-control -version | awk '{print $NF}')" = '1.7.9'
+          test "$(build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.9'
+      - name: Packaged systemd Fail2ban installer acceptance
+        working-directory: /tmp/v179/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          diagnostics() {
+            sudo systemctl status hyzorax-control-helper.service --no-pager || true
+            sudo journalctl -u hyzorax-control-helper.service --no-pager -n 200 || true
+          }
+          trap diagnostics ERR
+          sudo apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 update
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -y --no-install-recommends install openssh-server
+          sudo groupadd --system hyzorax-control
+          sudo useradd --system --gid hyzorax-control --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin hyzorax-control
+          sudo install -d -o root -g root -m 0755 /usr/local/libexec
+          sudo install -o root -g root -m 0755 build/hyzorax-control-helper /usr/local/libexec/hyzorax-control-helper
+          sudo install -o root -g root -m 0644 packaging/hyzorax-control-helper.service /etc/systemd/system/hyzorax-control-helper.service
+          sudo install -o root -g root -m 0644 packaging/hyzorax-control.tmpfiles.conf /etc/tmpfiles.d/hyzorax-control.conf
+          sudo systemd-tmpfiles --create /etc/tmpfiles.d/hyzorax-control.conf
+          sudo systemctl daemon-reload
+          sudo systemctl start hyzorax-control-helper.service
+          sudo systemctl is-active --quiet hyzorax-control-helper.service
+          for attempt in {1..50}; do
+            sudo test -S /run/hyzorax-control/helper.sock && break
+            sleep 0.1
+          done
+          sudo test -S /run/hyzorax-control/helper.sock
+          main_pid="$(sudo systemctl show hyzorax-control-helper.service -p MainPID --value)"
+          test "$main_pid" -gt 1
+          sudo grep -Eq '^NoNewPrivs:[[:space:]]+0$' "/proc/$main_pid/status"
+          families="$(sudo systemctl show hyzorax-control-helper.service -p RestrictAddressFamilies --value)"
+          for family in AF_UNIX AF_NETLINK AF_INET AF_INET6; do
+            grep -qw "$family" <<<"$families"
+          done
+          go test -c -tags=integration -o /tmp/hyzorax-helper-integration.test ./internal/helper
+          chmod 0755 /tmp/hyzorax-helper-integration.test
+          sudo -u hyzorax-control env HYZORAX_SYSTEMD_INSTALLER_ACCEPTANCE=1 HYZORAX_SYSTEMD_HELPER_SOCKET=/run/hyzorax-control/helper.sock /tmp/hyzorax-helper-integration.test -test.run '^TestFail2banInstallerSystemdServiceAcceptance$' -test.v
+          sudo systemctl is-active --quiet hyzorax-control-helper.service
+          sudo systemctl stop hyzorax-control-helper.service
+          trap - ERR
+          (cd /tmp/v179 && sha256sum -c base-hz.sha256)
+      - name: Build release package
+        working-directory: /tmp/v179/hyzorax-control
+        run: |
+          set -Eeuo pipefail
+          cp \
+            packaging/config.toml \
+            packaging/hyzorax-control.service \
+            packaging/hyzorax-control-helper.service \
+            packaging/hyzorax-control-tls-renew.service \
+            packaging/hyzorax-control-tls-renew.timer \
+            packaging/hyzorax-control.tmpfiles.conf \
+            packaging/bootstrap.sh \
+            packaging/hyzorax-control-tls \
+            packaging/hyzorax-control-updater \
+            packaging/hyzorax-dashboard \
+            packaging/hz \
+            build/
+          chmod 0755 build/bootstrap.sh build/hyzorax-control-tls build/hyzorax-control-updater build/hyzorax-dashboard build/hz
+          files=(
+            hyzorax-control
+            hyzorax-control-helper
+            config.toml
+            hyzorax-control.service
+            hyzorax-control-helper.service
+            hyzorax-control-tls-renew.service
+            hyzorax-control-tls-renew.timer
+            hyzorax-control.tmpfiles.conf
+            bootstrap.sh
+            hyzorax-control-tls
+            hyzorax-control-updater
+            hyzorax-dashboard
+            hz
+          )
+          for f in "${files[@]}"; do
+            test -f "build/$f" || { echo "Missing release file: $f" >&2; ls -la build; exit 1; }
+          done
+          (
+            cd build
+            sha256sum "${files[@]}" > SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+          test "$(build/hyzorax-control -version | awk '{print $NF}')" = '1.7.9'
+          test "$(build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.9'
+          grep -Fxq 'NoNewPrivileges=false' build/hyzorax-control-helper.service
+          grep -Fxq 'RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6' build/hyzorax-control-helper.service
+          cd /tmp/v179
+          rm -f HYZoraX_Control_Center_Linux_x86_64.tar.gz HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -czf HYZoraX_Control_Center_Linux_x86_64.tar.gz hyzorax-control
+          sha256sum HYZoraX_Control_Center_Linux_x86_64.tar.gz > HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          rm -rf /tmp/v179/verify
+          mkdir /tmp/v179/verify
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz -C /tmp/v179/verify
+          test -x /tmp/v179/verify/hyzorax-control/build/hyzorax-control
+          test -x /tmp/v179/verify/hyzorax-control/build/hyzorax-control-helper
+          test "$(/tmp/v179/verify/hyzorax-control/build/hyzorax-control -version | awk '{print $NF}')" = '1.7.9'
+          test "$(/tmp/v179/verify/hyzorax-control/build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.9'
+          grep -Fq 'Version 1.7.9' /tmp/v179/verify/hyzorax-control/internal/web/static/index.html
+          grep -Fq 'const ProtocolVersion = 21' /tmp/v179/verify/hyzorax-control/internal/helper/protocol.go
+          grep -Fxq 'NoNewPrivileges=false' /tmp/v179/verify/hyzorax-control/build/hyzorax-control-helper.service
+          grep -Fxq 'RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6' /tmp/v179/verify/hyzorax-control/build/hyzorax-control-helper.service
+          (cd /tmp/v179/verify/hyzorax-control/build && sha256sum --check --strict SHA256SUMS)
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view v1.7.9 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v1.7.9 already exists; refusing duplicate publish.' >&2
+            exit 1
+          fi
+          gh release create v1.7.9 \
+            /tmp/v179/HYZoraX_Control_Center_Linux_x86_64.tar.gz \
+            /tmp/v179/HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target a246edc1243253191b0d3003655b25d07987c550 \
+            --title 'HYZoraX Control Panel V1.7.9' \
+            --notes 'Permanently fixes guarded application installers under the packaged systemd helper: APT can perform its intentional _apt user transition and use IPv4/IPv6 while the remaining helper hardening stays enabled. Upgrades remove only the exact temporary V1.7.8 diagnostic drop-ins and preserve unrecognized administrator drop-ins. APT failures now return safe, actionable causes for clock skew and blocked runtime transitions. Validation executes the real Ubuntu 24.04 Fail2ban install, health, and rollback flow through the packaged helper socket. Helper protocol remains V21 and the hz main menu remains unchanged.' \
+            --latest
+      - name: Verify published latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          test "$latest" = 'v1.7.9'
+          target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v1.7.9" --jq .target_commitish)"
+          test "$target" = 'a246edc1243253191b0d3003655b25d07987c550'
+          assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v1.7.9" --jq '[.assets[].name] | sort | join("\n")')"
+          test "$assets" = $'HYZoraX_Control_Center_Linux_x86_64.tar.gz\nHYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256'
+          rm -rf /tmp/v179/published
+          mkdir -p /tmp/v179/published
+          gh release download v1.7.9 --repo "$GITHUB_REPOSITORY" --pattern 'HYZoraX_Control_Center_Linux_x86_64.tar.gz*' --dir /tmp/v179/published
+          cd /tmp/v179/published
+          sha256sum -c HYZoraX_Control_Center_Linux_x86_64.tar.gz.sha256
+          tar -xzf HYZoraX_Control_Center_Linux_x86_64.tar.gz
+          test "$(hyzorax-control/build/hyzorax-control -version | awk '{print $NF}')" = '1.7.9'
+          test "$(hyzorax-control/build/hyzorax-control-helper -version 2>&1 | awk '{print $NF}')" = '1.7.9'
+          grep -Fq 'Version 1.7.9' hyzorax-control/internal/web/static/index.html
+          grep -Fq 'const ProtocolVersion = 21' hyzorax-control/internal/helper/protocol.go
+          grep -Fxq 'NoNewPrivileges=false' hyzorax-control/build/hyzorax-control-helper.service
+          grep -Fxq 'RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6' hyzorax-control/build/hyzorax-control-helper.service
+          (cd hyzorax-control/build && sha256sum --check --strict SHA256SUMS)
