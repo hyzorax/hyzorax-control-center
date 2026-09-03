@@ -122,7 +122,7 @@ jobs:
           set -Eeuo pipefail
           source_dir="$(cat _release-work/source-path)"
           cd "$source_dir"
-          make clean
+          rm -f -- build/hyzorax-control build/hyzorax-control-helper build/SHA256SUMS
           make release VERSION="$VERSION"
           test "$(./build/hyzorax-control -version)" = "hyzorax-control $VERSION"
           test "$(./build/hyzorax-control-helper -version)" = "hyzorax-control-helper $VERSION"
