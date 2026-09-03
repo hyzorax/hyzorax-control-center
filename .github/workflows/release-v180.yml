@@ -14,6 +14,11 @@ on:
         required: true
         default: false
         type: boolean
+      replace_existing_assets:
+        description: "Replace the existing V1.8.0 binary assets after repair validation"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -128,34 +133,55 @@ jobs:
           test "$(./build/hyzorax-control-helper -version)" = "hyzorax-control-helper $VERSION"
           (cd build && sha256sum --check --strict SHA256SUMS)
 
-      - name: Package release assets
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+      - name: Package and validate release assets
         run: |
           set -Eeuo pipefail
           source_dir="$(cat _release-work/source-path)"
           mkdir -p _release-work/package/hyzorax-control
-          cp -a "$source_dir/build/." _release-work/package/hyzorax-control/
+          cp -a "$source_dir/." _release-work/package/hyzorax-control/
           tar -C _release-work/package -czf "_release-work/$BASE_ARCHIVE" hyzorax-control
           (cd _release-work && sha256sum "$BASE_ARCHIVE" > "$BASE_ARCHIVE.sha256")
           (cd _release-work && sha256sum -c "$BASE_ARCHIVE.sha256")
+          tar -tzf "_release-work/$BASE_ARCHIVE" > _release-work/archive.list
+          test "$(awk -F/ 'NF {print $1; exit}' _release-work/archive.list)" = "hyzorax-control"
+          mkdir -p _release-work/package-check
+          tar -xzf "_release-work/$BASE_ARCHIVE" -C _release-work/package-check
+          packaged_root="_release-work/package-check/hyzorax-control"
+          test -f "$packaged_root/go.mod"
+          test -f "$packaged_root/build/SHA256SUMS"
+          test -x "$packaged_root/build/hyzorax-control"
+          test -x "$packaged_root/build/hyzorax-control-helper"
+          test -x "$packaged_root/build/bootstrap.sh"
+          (cd "$packaged_root/build" && sha256sum --check --strict SHA256SUMS)
+          test "$("$packaged_root/build/hyzorax-control" -version)" = "hyzorax-control $VERSION"
+          test "$("$packaged_root/build/hyzorax-control-helper" -version)" = "hyzorax-control-helper $VERSION"
 
-      - name: Publish public V1.8.0 release
+      - name: Publish or repair public V1.8.0 release
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         env:
           GH_TOKEN: ${{ github.token }}
+          REPLACE_EXISTING: ${{ inputs.replace_existing_assets }}
         run: |
           set -Eeuo pipefail
           if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release v$VERSION already exists; refusing to overwrite it." >&2
-            exit 1
+            if [[ "$REPLACE_EXISTING" != "true" ]]; then
+              echo "Release v$VERSION already exists; explicit asset replacement was not selected." >&2
+              exit 1
+            fi
+            gh release upload "v$VERSION" \
+              "_release-work/$BASE_ARCHIVE" \
+              "_release-work/$BASE_ARCHIVE.sha256" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "v$VERSION" \
+              "_release-work/$BASE_ARCHIVE" \
+              "_release-work/$BASE_ARCHIVE.sha256" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "HYZoraX Control Center V1.8.0" \
+              --notes "V1.8.0 converts the complete HYZoraX Control Center into a cohesive desktop software interface while retaining Protocol V21, updater behavior, security controls, installer safeguards, and the hz launcher. The Linux x86_64 archive was reconstructed from the authenticated V1.7.9 release, patched, fully tested, and rebuilt in this workflow."
           fi
-          gh release create "v$VERSION" \
-            "_release-work/$BASE_ARCHIVE" \
-            "_release-work/$BASE_ARCHIVE.sha256" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "HYZoraX Control Center V1.8.0" \
-            --notes "V1.8.0 converts the complete HYZoraX Control Center into a cohesive desktop software interface while retaining Protocol V21, updater behavior, security controls, installer safeguards, and the hz launcher. The Linux x86_64 archive was reconstructed from the authenticated V1.7.9 release, patched, fully tested, and rebuilt in this workflow."
 
       - name: Verify published release and assets
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
@@ -170,6 +196,14 @@ jobs:
             --pattern "$BASE_ARCHIVE" \
             --pattern "$BASE_ARCHIVE.sha256"
           (cd _release-work/published && sha256sum -c "$BASE_ARCHIVE.sha256")
+          mkdir -p _release-work/published-check
+          tar -xzf "_release-work/published/$BASE_ARCHIVE" -C _release-work/published-check
+          published_root="_release-work/published-check/hyzorax-control"
+          test -f "$published_root/go.mod"
+          test -f "$published_root/build/SHA256SUMS"
+          (cd "$published_root/build" && sha256sum --check --strict SHA256SUMS)
+          test "$("$published_root/build/hyzorax-control" -version)" = "hyzorax-control $VERSION"
+          test "$("$published_root/build/hyzorax-control-helper" -version)" = "hyzorax-control-helper $VERSION"
           gh release view "v$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
             --json tagName,targetCommitish,isDraft,isPrerelease,url
