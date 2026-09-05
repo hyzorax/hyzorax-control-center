@@ -1,6 +1,10 @@
 name: Validate and publish V1.8.1
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-v181.yml"
   pull_request:
     branches: [main]
     paths:
@@ -145,7 +149,7 @@ jobs:
           test "$("$packaged_root/build/hyzorax-control-helper" -version)" = "hyzorax-control-helper $VERSION"
 
       - name: Publish V1.8.1 release
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -163,7 +167,7 @@ jobs:
             --notes "V1.8.1 aligns the Control Center with HYZoraX brand colours, moves Listening Ports out of the Security overview into a dedicated Network Bindings detail window, refreshes Applications as a desktop software catalogue, and upgrades File Manager with an explorer toolbar, current-directory search, and persistent list/grid views. Existing Protocol V21, guarded filesystem operations, updater behaviour, security controls, and the hz launcher are retained."
 
       - name: Verify published release and assets
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
