@@ -1,0 +1,180 @@
+name: Validate and publish V1.8.1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "release-patch/v1.8.1/**"
+      - ".github/workflows/release-v181.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the verified V1.8.1 GitHub release"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: v1.8.1-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  VERSION: "1.8.1"
+  BASE_TAG: "v1.8.0"
+  ARCHIVE: "HYZoraX_Control_Center_Linux_x86_64.tar.gz"
+  BASE_SHA256: "99ca59488ef0f3253e3adac37c7a9492c6a732f80ccc9892b538a0740ceeb894"
+  PATCH_FILE: "release-patch/v1.8.1/branded_explorer.py"
+  PATCH_SHA256: "c05c9f8803fe5c8d8dbeabae7f419c08bdaca7755b508051865dc5e267f0bfbb"
+  INDEX_SHA256: "8c78fed6b8c7e210b2d814d514652fdb215507cf30e7d54a317702ac16e57522"
+  CSS_SHA256: "0e6cbf2195aef540688fe5416359863960bf730c32ec2c566d04d3be7677c23b"
+  JS_SHA256: "4796f8adbc27e2ae8066861f7f84af5889d2c6a3d4e9ef2e4ebd9dd015969dee"
+  HZ_SHA256: "7ecc6c68e5507007424ca263fa0ee4b1ece25aae9c60257fb283d6cc62cd21b5"
+
+jobs:
+  validate-build-publish:
+    name: Reconstruct, validate, build, and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out release metadata
+        uses: actions/checkout@v4
+
+      - name: Set up Go 1.25
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+
+      - name: Download and authenticate V1.8.0 baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          rm -rf -- _release-work
+          mkdir -p _release-work/base
+          gh release download "$BASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir _release-work \
+            --pattern "$ARCHIVE" \
+            --pattern "$ARCHIVE.sha256"
+          echo "$BASE_SHA256  _release-work/$ARCHIVE" | sha256sum -c -
+          (cd _release-work && sha256sum -c "$ARCHIVE.sha256")
+          tar -xzf "_release-work/$ARCHIVE" -C _release-work/base
+          source_dir="$(find _release-work/base -type f -name go.mod -printf '%h\n' -quit)"
+          test -n "$source_dir"
+          printf '%s\n' "$source_dir" > _release-work/source-path
+          grep -F "Version 1.8.0" "$source_dir/internal/web/static/index.html"
+          grep -F "const ProtocolVersion = 21" "$source_dir/internal/helper/protocol.go"
+
+      - name: Authenticate and apply V1.8.1 patch
+        run: |
+          set -Eeuo pipefail
+          echo "$PATCH_SHA256  $PATCH_FILE" | sha256sum -c -
+          python3 -m py_compile "$PATCH_FILE"
+          source_dir="$(cat _release-work/source-path)"
+          python3 "$PATCH_FILE" "$source_dir"
+
+      - name: Verify release invariants
+        run: |
+          set -Eeuo pipefail
+          source_dir="$(cat _release-work/source-path)"
+          echo "$INDEX_SHA256  $source_dir/internal/web/static/index.html" | sha256sum -c -
+          echo "$CSS_SHA256  $source_dir/internal/web/static/app.css" | sha256sum -c -
+          echo "$JS_SHA256  $source_dir/internal/web/static/app.js" | sha256sum -c -
+          echo "$HZ_SHA256  $source_dir/packaging/hz" | sha256sum -c -
+          grep -F "Version 1.8.1" "$source_dir/internal/web/static/index.html"
+          grep -F 'id="security-network-dialog"' "$source_dir/internal/web/static/index.html"
+          grep -F 'id="file-search-input"' "$source_dir/internal/web/static/index.html"
+          grep -F 'file-grid-mode' "$source_dir/internal/web/static/app.css"
+          grep -F 'HYZoraX branded software catalog' "$source_dir/internal/web/static/app.css"
+          grep -F "const ProtocolVersion = 21" "$source_dir/internal/helper/protocol.go"
+          grep -F 'headers.set("Content-Type", "application/json")' "$source_dir/internal/web/static/app.js"
+          test "$(grep -o 'id="[^"]*"' "$source_dir/internal/web/static/index.html" | sort | uniq -d | wc -l)" -eq 0
+
+      - name: Run static checks
+        run: |
+          set -Eeuo pipefail
+          source_dir="$(cat _release-work/source-path)"
+          cd "$source_dir"
+          node --check internal/web/static/app.js
+          bash -n packaging/bootstrap.sh packaging/hyzorax-control-tls packaging/hyzorax-control-updater packaging/hyzorax-dashboard packaging/hz
+
+      - name: Run Go tests, race checks, and vet
+        run: |
+          set -Eeuo pipefail
+          source_dir="$(cat _release-work/source-path)"
+          cd "$source_dir"
+          go test ./...
+          go test -race ./internal/config ./internal/cryptoutil ./internal/helper ./internal/httpapi ./internal/installer ./internal/store ./internal/web
+          go vet ./...
+
+      - name: Build authenticated V1.8.1 bundle
+        run: |
+          set -Eeuo pipefail
+          source_dir="$(cat _release-work/source-path)"
+          cd "$source_dir"
+          rm -f -- build/hyzorax-control build/hyzorax-control-helper build/SHA256SUMS
+          make release VERSION="$VERSION"
+          test "$(./build/hyzorax-control -version)" = "hyzorax-control $VERSION"
+          test "$(./build/hyzorax-control-helper -version)" = "hyzorax-control-helper $VERSION"
+          (cd build && sha256sum --check --strict SHA256SUMS)
+
+      - name: Package and validate installer-compatible archive
+        run: |
+          set -Eeuo pipefail
+          source_dir="$(cat _release-work/source-path)"
+          mkdir -p _release-work/package/hyzorax-control
+          cp -a "$source_dir/." _release-work/package/hyzorax-control/
+          tar -C _release-work/package -czf "_release-work/$ARCHIVE" hyzorax-control
+          (cd _release-work && sha256sum "$ARCHIVE" > "$ARCHIVE.sha256")
+          (cd _release-work && sha256sum -c "$ARCHIVE.sha256")
+          mkdir -p _release-work/package-check
+          tar -xzf "_release-work/$ARCHIVE" -C _release-work/package-check
+          packaged_root="_release-work/package-check/hyzorax-control"
+          test -f "$packaged_root/go.mod"
+          test -f "$packaged_root/build/SHA256SUMS"
+          test -x "$packaged_root/build/hyzorax-control"
+          test -x "$packaged_root/build/hyzorax-control-helper"
+          test -x "$packaged_root/build/bootstrap.sh"
+          (cd "$packaged_root/build" && sha256sum --check --strict SHA256SUMS)
+          test "$("$packaged_root/build/hyzorax-control" -version)" = "hyzorax-control $VERSION"
+          test "$("$packaged_root/build/hyzorax-control-helper" -version)" = "hyzorax-control-helper $VERSION"
+
+      - name: Publish V1.8.1 release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists; refusing to replace assets." >&2
+            exit 1
+          fi
+          gh release create "v$VERSION" \
+            "_release-work/$ARCHIVE" \
+            "_release-work/$ARCHIVE.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "HYZoraX Control Center V1.8.1" \
+            --notes "V1.8.1 aligns the Control Center with HYZoraX brand colours, moves Listening Ports out of the Security overview into a dedicated Network Bindings detail window, refreshes Applications as a desktop software catalogue, and upgrades File Manager with an explorer toolbar, current-directory search, and persistent list/grid views. Existing Protocol V21, guarded filesystem operations, updater behaviour, security controls, and the hz launcher are retained."
+
+      - name: Verify published release and assets
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p _release-work/published _release-work/published-check
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --dir _release-work/published --pattern "$ARCHIVE" --pattern "$ARCHIVE.sha256"
+          (cd _release-work/published && sha256sum -c "$ARCHIVE.sha256")
+          tar -xzf "_release-work/published/$ARCHIVE" -C _release-work/published-check
+          published_root="_release-work/published-check/hyzorax-control"
+          test -f "$published_root/go.mod"
+          (cd "$published_root/build" && sha256sum --check --strict SHA256SUMS)
+          test "$("$published_root/build/hyzorax-control" -version)" = "hyzorax-control $VERSION"
+          test "$("$published_root/build/hyzorax-control-helper" -version)" = "hyzorax-control-helper $VERSION"
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json tagName,targetCommitish,isDraft,isPrerelease,url
