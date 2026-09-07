@@ -1,4 +1,5 @@
 name: Validate and publish V1.8.3
+# Changes to this existing main-branch workflow act as the authenticated publication trigger.
 
 on:
   push:
