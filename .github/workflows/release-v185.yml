@@ -110,7 +110,7 @@ jobs:
           grep -F '"/usr/bin/systemctl", input.Operation, "--", unit' "$source_dir/internal/helper/services_linux.go"
           grep -F '"--lines=120"' "$source_dir/internal/helper/services_linux.go"
           grep -F 'context.WithTimeout(context.Background(), 20*time.Second)' "$source_dir/internal/helper/services_linux.go"
-          grep -F 'service.apply' "$source_dir/internal/store/store.go"
+          grep -F 'service.%' "$source_dir/internal/store/store.go"
           grep -F 'showPanelConfirmation' "$source_dir/internal/web/static/app.js"
           grep -F 'scheduleServicesLive' "$source_dir/internal/web/static/app.js"
           grep -F '.service-card[data-busy="true"]' "$source_dir/internal/web/static/app.css"
