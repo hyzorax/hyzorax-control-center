@@ -4,12 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - ".github/workflows/release-v185.yml"
+      - ".github/workflows/release-v186.yml"
   pull_request:
     branches: [main]
     paths:
       - "release-patch/v1.8.6/**"
-      - ".github/workflows/release-v185.yml"
+      - ".github/workflows/release-v186.yml"
   workflow_dispatch:
     inputs:
       publish:
@@ -49,7 +49,7 @@ jobs:
           go-version: "1.25.x"
           cache: false
 
-      - name: Download and authenticate V1.8.4 baseline
+      - name: Download and authenticate V1.8.5 baseline
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -67,8 +67,8 @@ jobs:
           source_dir="$(find _release-work/base -type f -name go.mod -printf '%h\n' -quit)"
           test -n "$source_dir"
           printf '%s\n' "$source_dir" > _release-work/source-path
-          grep -F "Version 1.8.4" "$source_dir/internal/web/static/index.html"
-          grep -F "const ProtocolVersion = 21" "$source_dir/internal/helper/protocol.go"
+          grep -F "Version 1.8.5" "$source_dir/internal/web/static/index.html"
+          grep -F "const ProtocolVersion = 22" "$source_dir/internal/helper/protocol.go"
 
       - name: Authenticate and apply V1.8.6 compact software catalogue patch
         run: |
@@ -88,7 +88,7 @@ jobs:
           import pathlib
           import sys
 
-          spec = importlib.util.spec_from_file_location("v185_patch", sys.argv[1])
+          spec = importlib.util.spec_from_file_location("v186_patch", sys.argv[1])
           module = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(module)
           root = pathlib.Path(sys.argv[2])
