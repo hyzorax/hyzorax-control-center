@@ -204,7 +204,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "HYZoraX Control Center V1.8.7" \
-            --notes "V1.8.7 redesigns Applications as a compact desktop software catalogue with clear Software, Developer, Instructions, Target, Installed, Status, and Action columns. It retains guarded installers, live filters, responsive mobile rows, the V1.8.5 Services Manager, update-recovery safeguards, and the HYZoraX aqua-to-royal-blue brand system."
+            --notes "V1.8.7 fixes the Applications desktop table so Software, Developer, Instructions, Target, Installed, Status, and Action remain on one compact row. Responsive mobile stacking, guarded installers, Services Manager, update recovery, and HYZoraX branding are retained."
 
       - name: Verify published release and assets
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
